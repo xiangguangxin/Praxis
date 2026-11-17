@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "praxis-agent-runtime"
+version = "0.1.0"
+description = "Goal-Driven Autonomous Agent Runtime"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Praxis contributors"}]
+keywords = ["agent", "runtime", "gui", "automation", "verification"]
+classifiers = ["Programming Language :: Python :: 3", "License :: OSI Approved :: MIT License"]
+dependencies = []
+
+[project.optional-dependencies]
+browser = ["playwright>=1.49,<2"]
+
+[project.scripts]
+praxis = "praxis_agent.cli:main"
+praxis-benchmark = "praxis_agent.benchmark:main"
+praxis-experience = "praxis_agent.experience_cli:main"
+openas-gui = "praxis_agent.cli:main"
+openas-benchmark = "praxis_agent.benchmark:main"
+openas-experience = "praxis_agent.experience_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
