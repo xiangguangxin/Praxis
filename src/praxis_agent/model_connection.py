@@ -6,6 +6,12 @@ from urllib.parse import urlsplit, urlunsplit
 DEFAULT_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 
 
+def _env(primary, legacy):
+    """Prefer standalone Praxis configuration; accept old OpenAS names."""
+    value = os.getenv(primary)
+    return value if value is not None else os.getenv(legacy)
+
+
 @dataclass(frozen=True)
 class ModelConnection:
     model: str
@@ -41,14 +47,14 @@ def _litellm_endpoint(base_url):
 
 
 def resolve_model_connection(args):
-    model = args.model if args.model is not None else os.getenv("OPENAS_GUI_MODEL")
+    model = args.model if args.model is not None else _env("PRAXIS_MODEL", "OPENAS_GUI_MODEL")
     endpoint = args.endpoint
     gateway = args.litellm_base_url
     if gateway == "":
         raise ValueError("--litellm-base-url requires a nonempty URL")
     if endpoint is None and gateway is None:
-        endpoint = os.getenv("OPENAS_GUI_API_URL")
-        gateway = os.getenv("OPENAS_LITELLM_BASE_URL")
+        endpoint = _env("PRAXIS_API_URL", "OPENAS_GUI_API_URL")
+        gateway = _env("PRAXIS_LITELLM_BASE_URL", "OPENAS_LITELLM_BASE_URL")
         if endpoint and gateway:
             raise ValueError("Both model routes are configured. Select --endpoint or --litellm-base-url explicitly.")
 
@@ -63,7 +69,7 @@ def resolve_model_connection(args):
             raise ValueError("The direct model endpoint requires a nonempty URL")
         if endpoint is None:
             endpoint = DEFAULT_ENDPOINT
-    key = os.getenv(key_name)
+    key = _env("PRAXIS_API_KEY", "OPENAS_GUI_API_KEY") if key_name == "OPENAS_GUI_API_KEY" else os.getenv(key_name)
     if not key or not model:
-        raise ValueError(f"Set {key_name} and OPENAS_GUI_MODEL (or --model)")
+        raise ValueError(f"Set {key_name} (or PRAXIS_API_KEY for direct models) and PRAXIS_MODEL / OPENAS_GUI_MODEL (or --model)")
     return ModelConnection(model, key, endpoint, kind)
