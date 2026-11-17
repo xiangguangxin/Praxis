@@ -15,6 +15,16 @@ class ModelConnectionTests(unittest.TestCase):
         with patch.dict(os.environ, environ, clear=True):
             return resolve_model_connection(self.parser.parse_args(flags))
 
+    def test_praxis_environment_is_preferred_and_legacy_names_work(self):
+        env = {"PRAXIS_MODEL": "new-model", "PRAXIS_API_KEY": "new-key",
+               "PRAXIS_API_URL": "https://praxis.test/v1/chat/completions",
+               "OPENAS_GUI_MODEL": "old-model", "OPENAS_GUI_API_KEY": "old-key",
+               "OPENAS_GUI_API_URL": "https://legacy.test/v1/chat/completions"}
+        conn = self.resolve([], env)
+        self.assertEqual(conn.model, "new-model")
+        self.assertEqual(conn.api_key, "new-key")
+        self.assertEqual(conn.endpoint, "https://praxis.test/v1/chat/completions")
+
     def test_direct_endpoint_and_default_keep_the_existing_credential(self):
         env = {"OPENAS_GUI_API_KEY": "fixture-direct", "OPENAS_GUI_MODEL": "provider-model",
                "LITELLM_API_KEY": "fixture-gateway"}
