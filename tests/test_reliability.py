@@ -230,6 +230,18 @@ class ReliabilityTests(unittest.TestCase):
         nova.call = lambda *_: self.fail("Must not invoke an unclassified observation tool")
         self.assertNotIn("content", nova.observe())
 
+    def test_screenshot_only_observations_change_identity_without_persisting_pixels(self):
+        from praxis_agent.observations import normalize
+        first = normalize({"summary": "desktop", "content": [{"type": "image", "data": "first"}]})
+        second = normalize({"summary": "desktop", "content": [{"type": "image", "data": "second"}]})
+        self.assertNotEqual(first["observation_id"], second["observation_id"])
+
+    def test_experience_writer_refuses_overlapping_mutation(self):
+        from praxis_agent.locking import checkpoint_lock
+        store = ExperienceStore(self.root / "store.json")
+        with checkpoint_lock(store.path):
+            with self.assertRaises(RuntimeError): store.expire()
+
     def test_cli_exit_codes_distinguish_completion_pause_and_block(self):
         for status, code in (("completed", 0), ("paused", 3), ("blocked", 4), ("failed", 5)):
             with self.subTest(status=status), patch("sys.argv", ["praxis", "run", "state.json", "--nova", "fixture"]), \
