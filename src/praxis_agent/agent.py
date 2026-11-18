@@ -132,6 +132,7 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             kind = decision.get("type")
             # An approval is consumed by the immediately following decision only.
             grant, approved = approved, None
+            state.pop("pending_review", None)
             if kind == "complete":
                 phase = "verification"
                 if not _verify(state, verifier, decision.get("evidence", {}), observation):

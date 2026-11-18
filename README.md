@@ -73,6 +73,7 @@ Open `demo-run/index.html` for the actual final screenshot, downloaded report an
 independent verification results. This is a **real Chromium integration demo with
 a deterministic fixture planner**, requiring no API key. It is not a real-model
 success-rate claim. [Reproduce it or run live acceptance](docs/ACCEPTANCE.md).
+See the [recorded validation and downloadable demo](docs/VALIDATION.md).
 
 ## Architecture
 
