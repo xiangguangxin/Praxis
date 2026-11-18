@@ -6,7 +6,7 @@ from .experience import ExperienceStore
 from .verification import FileVerifier
 
 def main():
-    parser = argparse.ArgumentParser(description="OpenAS verified experience store")
+    parser = argparse.ArgumentParser(description="Praxis verified experience store")
     parser.add_argument("--store", type=Path, required=True)
     sub = parser.add_subparsers(dest="command", required=True)
     add = sub.add_parser("add")
@@ -14,6 +14,9 @@ def main():
     add.add_argument("--verifier", type=Path, required=True)
     add.add_argument("--environment", required=True)
     add.add_argument("--note", required=True)
+    add.add_argument("--precondition", action="append", default=[])
+    add.add_argument("--key-step", action="append", default=[])
+    add.add_argument("--failure-mode", action="append", default=[])
     search = sub.add_parser("search")
     search.add_argument("query")
     search.add_argument("--environment", required=True)
@@ -30,7 +33,8 @@ def main():
     if args.command == "add":
         verifier = FileVerifier.from_json(args.verifier)
         result = store.add_verified(args.checkpoint, verifier=verifier,
-                                    environment=args.environment, note=args.note)
+                                    environment=args.environment, note=args.note,
+                                    preconditions=args.precondition, key_steps=args.key_step, failure_modes=args.failure_mode)
     elif args.command == "search":
         result = store.search(args.query, environment=args.environment)
     elif args.command == "feedback":

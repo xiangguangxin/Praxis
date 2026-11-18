@@ -23,14 +23,17 @@ def _save(path: Path, state: dict[str, Any]) -> None:
 def create(path: Path, goal: str, criteria: list[str], *, max_steps: int = 40) -> dict[str, Any]:
     if path.exists():
         raise FileExistsError(f"Refusing to overwrite checkpoint: {path}")
-    if not goal.strip() or not criteria or max_steps < 1:
+    if (not isinstance(goal, str) or not goal.strip() or len(goal) > 2000
+            or not isinstance(criteria, list) or not 1 <= len(criteria) <= 20
+            or any(not isinstance(c, str) or not c.strip() or len(c) > 500 for c in criteria)
+            or len(set(criteria)) != len(criteria) or type(max_steps) is not int or max_steps < 1):
         raise ValueError("Goal, criteria and positive step budget required")
     state = {
         "version": 2, "id": str(uuid.uuid4()), "goal": goal,
         "criteria": criteria, "status": "planning", "steps": 0,
         "max_steps": max_steps, "failures": 0, "last_observation": None,
         "last_result": None, "pending_action": None, "pending_approval": None,
-        "history": [], "created_at": time.time(), "updated_at": time.time(),
+        "history": [], "verification_level": "unverified", "recent_actions": [], "created_at": time.time(), "updated_at": time.time(),
     }
     _save(path, state)
     return state
@@ -42,6 +45,16 @@ def load(path: Path) -> dict[str, Any]:
         raise ValueError("Unsupported or corrupt checkpoint")
     if not isinstance(state.get("id"), str) or not isinstance(state.get("criteria"), list) or not isinstance(state.get("steps"), int):
         raise ValueError("Corrupt checkpoint structure")
+    if (not isinstance(state.get("goal"), str) or not state["goal"].strip()
+            or not state["criteria"] or any(not isinstance(c, str) or not c.strip() for c in state["criteria"])
+            or type(state["steps"]) is not int or state["steps"] < 0
+            or type(state.get("max_steps")) is not int or state["max_steps"] < 1
+            or type(state.get("failures")) is not int or state["failures"] < 0
+            or not isinstance(state.get("history"), list)
+            or any(key not in state for key in ("pending_action", "pending_approval"))):
+        raise ValueError("Corrupt checkpoint structure")
+    state.setdefault("verification_level", "legacy_unspecified" if state["status"] == "completed" else "unverified")
+    state.setdefault("recent_actions", [])
     # v1 is readable in-memory; migrated to v2 only on next intentional write.
     if state["version"] == 1:
         state["version"] = 2

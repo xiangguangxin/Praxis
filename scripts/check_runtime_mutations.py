@@ -11,6 +11,12 @@ import tempfile
 
 RUNTIME = Path(__file__).resolve().parents[1]
 MUTATIONS = (
+    ("ignore-sensitive-control-target", "policy.py", "if any(_sensitive(value) for value in targets):", "if False:",
+     "test_reliability.ReliabilityTests.test_generic_click_sensitive_targets_need_review_in_both_languages"),
+    ("skip-action-budget", "agent.py", 'if state["steps"] >= state["max_steps"]:', "if False:",
+     "test_reliability.ReliabilityTests.test_budget_never_permits_an_extra_mutation"),
+    ("hide-tools-after-twelve", "planner.py", "for tool in (tools if limit is None else tools[:limit]):",
+     "for tool in tools[:12]:", "test_reliability.ReliabilityTests.test_tool_after_twelfth_can_be_discovered_with_full_schema"),
     ("accept-stale-artifact", "verification.py", 'return "stale_artifact", evidence',
      'return "passed", evidence', "test_artifact_acceptance.CoverageAcceptanceTests.test_stale_report_cannot_pass"),
     ("ignore-action-count", "tool_trace.py", "if counts[tool] > maximum:", "if False:",

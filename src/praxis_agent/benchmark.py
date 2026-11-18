@@ -88,6 +88,7 @@ def _record(case, index, variant, state, verifier, actions, elapsed):
     return {
         "scenario": case["name"], "iteration": index + 1, "variant": variant,
         "passed": passed, "completed_and_verified": confirmed, "status": state["status"],
+        "verification_level": state.get("verification_level", "unverified"),
         "expected_status": expected, "checks": {name: check["status"] for name, check in actual["checks"].items()},
         "actions": actions, "reconciled": recovered, "model_calls": usage.get("calls", 0),
         "input_tokens": usage.get("input_tokens", 0), "output_tokens": usage.get("output_tokens", 0),
@@ -205,13 +206,17 @@ def live_benchmark(scenarios, args):
                                            max_tokens=args.max_model_tokens,
                                            experience_store=experience if variant == "experience" else None,
                                            experience_environment=args.experience_environment)
-                    scope = browser_scope(args.browser_url, output) if args.browser_url else None
+                    from .policy import ActionPolicy, fingerprint
+                    policy_path = getattr(args, "policy", None)
+                    policy = ActionPolicy.from_json(policy_path) if policy_path else ActionPolicy()
+                    scope = (browser_scope(args.browser_url, output) if args.browser_url else
+                             fingerprint({"nova": str(Path(args.nova).resolve())}))
                     start = time.perf_counter()
                     with open_session(planner, nova=args.nova, browser_url=args.browser_url,
                                       download_dir=output if args.browser_url else None,
                                       browser_executable=args.browser_executable) as target:
                         state = run(path, target, planner, verifier=verifier, backend_scope=scope,
-                                    trace_tools="expected_trajectory" in case)
+                                    trace_tools="expected_trajectory" in case, policy=policy)
                         backend_version = getattr(target, "backend_version", None)
                     record = _record(case, index, variant, state, verifier, state["steps"],
                                      time.perf_counter() - start)
@@ -223,7 +228,7 @@ def live_benchmark(scenarios, args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate OpenAS goal execution")
+    parser = argparse.ArgumentParser(description="Evaluate Praxis goal execution")
     parser.add_argument("suite", type=Path)
     parser.add_argument("--case", help="Only run this scenario")
     parser.add_argument("--repeat", type=int, default=1)
@@ -232,6 +237,7 @@ def main():
     backend.add_argument("--nova", help="Run a live suite against the specified Nova executable")
     backend.add_argument("--browser-url", help="Run a live suite in isolated Playwright Chromium")
     parser.add_argument("--browser-executable")
+    parser.add_argument("--policy", type=Path, help="Trusted exact-match action policy for live benchmarks")
     add_model_arguments(parser)
     parser.add_argument("--max-model-calls", type=int, default=35)
     parser.add_argument("--max-model-tokens", type=int, default=50_000)
@@ -253,7 +259,7 @@ def main():
         else:
             if args.litellm_base_url is not None:
                 raise ValueError("--litellm-base-url requires a live backend")
-            if args.experience_store or args.experience_environment or args.browser_executable:
+            if args.experience_store or args.experience_environment or args.browser_executable or args.policy:
                 raise ValueError("Experience and browser options require a live backend")
             result = benchmark(suite, repeat=args.repeat)
         output = json.dumps(result, ensure_ascii=False, indent=2)

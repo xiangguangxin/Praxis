@@ -7,7 +7,10 @@ class LiveDesktop:
         self.backend_version = getattr(nova, "backend_version", None)
 
     def observe(self):
-        return self.nova.observe()
+        observation = self.nova.observe()
+        if "content" in observation:
+            self.planner.last_tool_content = observation["content"]
+        return observation
 
     def act(self, action):
         result = self.nova.act(action)

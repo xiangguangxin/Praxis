@@ -214,4 +214,109 @@ praxis-experience --store ./experiences.json invalidate EXPERIENCE_ID \
 praxis-experience --store ./experiences.json expire
 ```
 
-The CLI cannot independently establish that feedback is true: operators must check their evidence before submitting feedback. Environment tags should include relevant OS, app and workflow versions. The store remains single-writer local JSON; avoid concurrent writers. Hints may include operator notes, so do not store secrets. This is a first-stage retrieval/lifecycle implementation, not autonomous experience learning or real-world success-rate proof.
+The CLI cannot independently establish that feedback is true: operators must check their evidence before submitting feedback. Environment tags should include relevant OS, app and workflow versions. The store remains serialized local-writer local JSON; avoid concurrent writers. Hints may include operator notes, so do not store secrets. This is a first-stage retrieval/lifecycle implementation, not autonomous experience learning or real-world success-rate proof.
+
+
+## Reviewable approval and action policy
+
+The host classifies both tool names and locator/command arguments. Generic clicks
+on controls such as `Send`, `Delete account`, `确认付款` and `发送消息` require review
+regardless of the planner's low-impact classification. Executable payloads and
+ambiguous submission shortcuts also require review. Heuristics cannot determine
+all effects of arbitrary controls: use an operator-owned policy for critical workflows.
+
+```bash
+praxis run goal.json --browser-url https://example.com --policy examples/action-policy.json
+praxis status goal.json
+praxis resume goal.json --browser-url https://example.com --policy examples/action-policy.json \
+  --approve-pending --approval-id FINGERPRINT_FROM_PENDING_REVIEW
+```
+
+A policy rule matches one tool and its **entire** argument object. Extra arguments
+or another target do not match. Effects are `allow`, `approve` and `deny`; deny wins
+over conflicting matches. Policies bind to the checkpoint and cannot silently
+change on resume. An allow is explicit operator authorization, so use exact test
+fixture targets instead of broad production actions.
+
+`pending_review` contains the tool, bounded target locators, reason, request ID,
+context fingerprint and a ten-minute expiry. Text values, executable payloads and
+credentials are redacted; URL credentials, queries and fragments are omitted.
+Raw executable arguments are not stored. After approval the planner reobserves and
+reproposes an action. Only an identical action in the same observed view/backend
+can consume the grant, and only on the immediately following decision. A changed
+view or action produces a new request. Dynamic pages may therefore require a new
+review. Legacy hash-only approvals require a new review as well.
+
+## Completion, diagnostics and recovery
+
+| `verification_level` | Meaning |
+| --- | --- |
+| `unverified` | No successful completion check |
+| `model_evidence` | Model-supplied criterion strings; not independent proof |
+| `independent_artifact` | Bound local file verifier passed; checks and identity recorded |
+| `custom_verifier` | Caller-supplied verifier returned true; independence is caller-defined |
+| `legacy_unspecified` | Older completed checkpoint has no verification provenance |
+
+A final read-only observation and artifact check remain available after the last
+allowed action. No additional modifying action is permitted. With model-only
+verification, one final completion decision is permitted and still consumes the
+configured model budget. File-verifier identity binds even without freshness rules.
+
+Execution commands (`run`, `resume`, `demo`) use exit codes 0 completed, 3 paused,
+4 blocked, 5 failed. Invalid CLI/configuration uses 2. `verify` uses 0/1 for
+pass/fail; `doctor` uses 0/1 for healthy/unhealthy. `status`, `retry` and `reconcile`
+report their operation's result without treating a paused checkpoint as a CLI error.
+
+`last_error` records a stable code, phase, possible action dispatch and recovery
+instruction. Raw exceptions/provider messages are not checkpointed. Recent actions
+retain up to eight known tool names and outcomes, without raw arguments or UI trees.
+Three identical actions on an unchanged observed view pause with `no_progress`.
+
+```bash
+# After correcting a known-outcome failure, explicitly reopen the goal.
+praxis retry goal.json --note "Provider connectivity restored"
+praxis resume goal.json --nova /absolute/path/to/nova
+
+# Extend an exhausted action budget without resetting the action counter.
+praxis retry goal.json --max-steps 60 --note "Authorized remaining work"
+```
+
+`retry` refuses in-flight uncertain actions, pending approvals and denied goals.
+Use `reconcile` only after independently checking an uncertain action's outcome.
+
+## Tool discovery and observation feedback
+
+The model receives a paged tool directory (24 entries per page) and at most six
+selected complete schemas. It may choose `{"type":"discover","query":"download",
+"offset":0,"tools":["actual_advertised_tool"]}` to load any advertised tool,
+including tools after position 12. Discovery is internal and never dispatches a
+backend action. Four consecutive discovery requests are allowed before pausing.
+Schemas too large for the context limit are explicitly marked unavailable. The
+planner must pause for assistance rather than invent parameters. Context shrinking
+operates on whole fields before JSON serialization and preserves goal/criteria.
+
+Nova automatically refreshes observations only using advertised observation tools
+with `readOnlyHint=true` and no required arguments. Backends without such a tool
+retain the explicit model-driven observation path. Screenshot/tool content remains
+transient. Nova tool-list pagination is supported. Browser observations use the
+current accessibility tree, and recent tool outcomes return to the planner.
+
+## Curated experience explanations
+
+```bash
+praxis-experience --store experiences.json add goal.json --verifier rules.json \
+  --environment win11-app-v1 --note "Output independently inspected" \
+  --precondition "Instrumented project is loaded" \
+  --key-step "Build before running SIL cases" \
+  --failure-mode "Wait for test completion before downloading"
+```
+
+Each repeated note option accepts at most eight entries of 200 characters. Store
+records include the checkpoint ID, verifier identity, check time, count and available
+artifact hashes. These references explain provenance; they do not authorize replay.
+Preconditions are hints, not automatically established truths. Existing version-1
+stores remain readable. Writers acquire a process lock, preventing lost updates
+between concurrent local writers; this does not provide distributed locking.
+
+For readiness checks, complete examples, CI artifacts and separately labelled
+real-provider acceptance, see [the acceptance guide](docs/ACCEPTANCE.md).

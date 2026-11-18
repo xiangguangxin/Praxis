@@ -69,6 +69,11 @@ def resolve_model_connection(args):
             raise ValueError("The direct model endpoint requires a nonempty URL")
         if endpoint is None:
             endpoint = DEFAULT_ENDPOINT
+    parts = urlsplit(endpoint)
+    if (parts.scheme not in {"http", "https"} or not parts.hostname or parts.username is not None
+            or parts.password is not None or parts.query or parts.fragment
+            or any(c.isspace() for c in endpoint)):
+        raise ValueError("Model endpoint must be HTTP(S) without credentials, query or fragment")
     key = _env("PRAXIS_API_KEY", "OPENAS_GUI_API_KEY") if key_name == "OPENAS_GUI_API_KEY" else os.getenv(key_name)
     if not key or not model:
         raise ValueError(f"Set {key_name} (or PRAXIS_API_KEY for direct models) and PRAXIS_MODEL / OPENAS_GUI_MODEL (or --model)")

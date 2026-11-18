@@ -1,26 +1,64 @@
-"""Bounded stateful agent execution."""
+"""Bounded, observable goal execution with write-ahead action recovery."""
 from __future__ import annotations
 import time
 from pathlib import Path
 from typing import Any
 from .state import load, persist, _record, TERMINAL
-from .policy import needs_approval, fingerprint
+from .policy import ActionPolicy, fingerprint, review_arguments
 from .verifier import EvidenceOnlyVerifier
 from .verification import FileVerifier
 from .locking import checkpoint_lock
 from .planner import TokenBudgetExceeded
+from .diagnostics import error_detail, safe_summary
+from .observations import normalize
 from . import tool_trace
+
+APPROVAL_TTL = 600
 
 
 def run(path: Path, desktop, planner, *, approval: bool = False, verifier=None,
-        backend_scope=None, trace_tools: bool = False) -> dict[str, Any]:
+        backend_scope=None, trace_tools: bool = False, policy=None, approval_id=None) -> dict[str, Any]:
     with checkpoint_lock(path):
         return _run_locked(path, desktop, planner, approval=approval, verifier=verifier,
-                           backend_scope=backend_scope, trace_tools=trace_tools)
+                           backend_scope=backend_scope, trace_tools=trace_tools,
+                           policy=policy or ActionPolicy(), approval_id=approval_id)
 
 
-def _run_locked(path: Path, desktop, planner, *, approval: bool, verifier,
-                backend_scope, trace_tools: bool) -> dict[str, Any]:
+def _verify(state, verifier, evidence, observation):
+    if isinstance(verifier, FileVerifier):
+        state["artifact_verification"] = verifier.evaluate(state)
+        accepted = state["artifact_verification"]["passed"]
+        level, source = "independent_artifact", "file_verifier"
+        if not accepted:
+            _record(state, "artifact_rejected", ", ".join(
+                check["status"] for check in state["artifact_verification"]["checks"].values()))
+    else:
+        selected = verifier or EvidenceOnlyVerifier()
+        accepted = selected.verify(state["criteria"], evidence, observation)
+        level = "model_evidence" if isinstance(selected, EvidenceOnlyVerifier) else "custom_verifier"
+        source = "model_claim" if level == "model_evidence" else type(selected).__name__
+    if accepted:
+        state["status"] = "completed"
+        state["verification"] = {"level": level, "source": source, "checked_at": time.time(),
+                                 "criteria_count": len(state["criteria"])}
+        if isinstance(verifier, FileVerifier):
+            state["verification"]["verifier_id"] = verifier.identity
+            state["verification"]["checks"] = state["artifact_verification"]["checks"]
+        state["verification_level"] = level
+        state["stop_reason"] = "criteria_satisfied"
+        state["pending_action"] = None
+        state["pending_approval"] = None
+        state.pop("pending_review", None)
+        _record(state, "completed", level)
+    return accepted
+
+
+def _pause(state, reason):
+    state["status"], state["stop_reason"] = "paused", reason
+    _record(state, "paused", reason)
+
+
+def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, trace_tools, policy, approval_id):
     state = load(path)
     if state["status"] in TERMINAL:
         return state
@@ -30,38 +68,60 @@ def _run_locked(path: Path, desktop, planner, *, approval: bool, verifier,
         # A crash may have happened after a non-idempotent action was executed.
         # Never automatically replay it; require operator reconciliation.
         state["status"] = "blocked"
+        state["stop_reason"] = "reconciliation_required"
         _record(state, "reconciliation_required", state["pending_action"]["name"])
         return persist(path, state)
     saved_scope = state.get("backend_scope")
     if saved_scope is not None and backend_scope != saved_scope:
-        raise ValueError("Resume requires the original browser settings")
+        raise ValueError("Resume requires the original backend settings")
     if backend_scope is not None and saved_scope is None:
         if state["steps"] or state.get("last_result") or state.get("pending_approval"):
-            raise ValueError("Start browser execution with a fresh checkpoint")
+            raise ValueError("Start backend-scoped execution with a fresh checkpoint")
         state["backend_scope"] = backend_scope
+    saved_policy = state.get("policy_id")
+    if saved_policy is not None and saved_policy != policy.identity:
+        raise ValueError("Resume requires the original operator policy")
+    state["policy_id"] = policy.identity
+    saved_verifier = state.get("verifier_id")
+    if saved_verifier is not None and (not isinstance(verifier, FileVerifier) or saved_verifier != verifier.identity):
+        raise ValueError("Resume requires the original artifact verifier")
     if isinstance(verifier, FileVerifier):
+        state["verifier_id"] = verifier.identity
         verifier.prepare(state)
     elif state.get("artifact_baseline") is not None:
         raise ValueError("Resume requires the original artifact verifier")
-
+    approved = None
     if approval and state["pending_approval"]:
-        # Approval applies only to the exact pending action, not future actions.
-        state["approved_action"] = state["pending_approval"]
+        pending = state.get("pending_review")
+        if approval_id is not None and approval_id != state["pending_approval"]:
+            raise ValueError("Approval ID does not match the pending request")
+        # Legacy hash-only requests cannot be reviewed or bound to current context.
+        if pending and pending.get("expires_at", 0) >= time.time():
+            approved = state["pending_approval"]
         state["pending_approval"] = None
+    state.pop("approved_action", None)
     state["status"] = "running"
+    state.pop("stop_reason", None)
     if trace_tools:
         tool_trace.enable(state)
     if hasattr(planner, "usage"):
         planner.usage.update(state.get("model_usage", {}))
     persist(path, state)
-    while state["steps"] < state["max_steps"]:
-        # Recover pending action conservatively: observe before any retry.
+    discoveries = 0
+    while True:
+        phase = "observation"
         try:
-            observation = desktop.observe()
-            if not isinstance(observation, dict):
-                raise TypeError("Desktop observation must be a dict")
-            state["last_observation"] = {"observed_at": time.time(),
-                                         "summary": str(observation.get("summary", ""))[:200]}
+            observation = normalize(desktop.observe())
+            state["last_observation"] = {"observed_at": observation["observed_at"],
+                                         "observation_id": observation["observation_id"],
+                                         "summary": safe_summary(observation.get("summary", ""))}
+            # The action budget never prevents a final, read-only artifact check.
+            if state["steps"] >= state["max_steps"] and isinstance(verifier, FileVerifier):
+                phase = "verification"
+                if not _verify(state, verifier, {}, observation):
+                    _pause(state, "step_budget_exhausted")
+                break
+            phase = "planning"
             try:
                 decision = planner.decide(state.copy(), observation)
             finally:
@@ -70,77 +130,102 @@ def _run_locked(path: Path, desktop, planner, *, approval: bool, verifier,
             if not isinstance(decision, dict):
                 raise TypeError("Planner decision must be a dict")
             kind = decision.get("type")
+            # An approval is consumed by the immediately following decision only.
+            grant, approved = approved, None
             if kind == "complete":
-                if isinstance(verifier, FileVerifier):
-                    state["artifact_verification"] = verifier.evaluate(state)
-                    accepted = state["artifact_verification"]["passed"]
-                    if not accepted:
-                        _record(state, "artifact_rejected", ", ".join(
-                            check["status"] for check in state["artifact_verification"]["checks"].values()))
-                else:
-                    accepted = (verifier or EvidenceOnlyVerifier()).verify(
-                        state["criteria"], decision.get("evidence", {}), observation)
-                if not accepted:
+                phase = "verification"
+                if not _verify(state, verifier, decision.get("evidence", {}), observation):
                     raise ValueError("Missing acceptance evidence for one or more criteria")
-                state["status"] = "completed"
-                _record(state, "completed", "all criteria have evidence")
-                state["pending_action"] = None
                 break
             if kind == "pause":
-                state["status"] = "paused"
-                _record(state, "paused", decision.get("reason"))
+                _pause(state, "planner_requested")
                 break
-            if kind != "act" or not isinstance(decision.get("action"), dict):
-                raise ValueError("Planner must choose act, complete or pause")
-            action = decision["action"]
-            if not isinstance(action.get("name"), str) or not action["name"]:
-                raise ValueError("Action name required")
-            # Planner must explicitly classify impact. Unclassified actions require approval.
-            if needs_approval(action):
-                scope = observation.get("action_scope") if backend_scope is not None else None
-                action_fingerprint = fingerprint({"scope": scope, "action": action} if scope else action)
-                if state.pop("approved_action", None) != action_fingerprint:
-                    state["pending_approval"] = action_fingerprint
-                    state["status"] = "paused"
-                    _record(state, "approval_required", action["name"])
+            if state["steps"] >= state["max_steps"]:
+                _pause(state, "step_budget_exhausted")
+                break
+            if kind == "discover":
+                discoveries += 1
+                if discoveries > 4:
+                    _pause(state, "tool_discovery_budget_exhausted")
                     break
+                query, offset = decision.get("query", ""), decision.get("offset", 0)
+                names = decision.get("tools", [])
+                known = {tool["name"] for tool in observation.get("tools", []) if isinstance(tool, dict) and isinstance(tool.get("name"), str)}
+                if (not isinstance(query, str) or len(query) > 160 or type(offset) is not int or offset < 0
+                        or not isinstance(names, list) or len(names) > 6
+                        or any(not isinstance(name, str) or name not in known for name in names)):
+                    raise ValueError("Invalid tool discovery request")
+                state["tool_selection"] = {"query": query, "offset": offset, "names": names}
+                continue
+            if kind != "act" or not isinstance(decision.get("action"), dict):
+                raise ValueError("Planner must choose act, discover, complete or pause")
+            action = decision["action"]
+            if not isinstance(action.get("name"), str) or not action["name"] or not isinstance(action.get("arguments", {}), dict):
+                raise ValueError("Action requires a name and argument object")
+            phase = "policy"
+            effect, reason = policy.classify(action)
+            if effect == "deny":
+                state["status"], state["stop_reason"] = "blocked", "policy_denied"
+                state["last_error"] = {"code": "policy_denied", "phase": phase, "may_have_executed": False,
+                                       "recovery": "Review the operator policy and create a new authorized goal."}
+                _record(state, "policy_denied", action["name"])
+                break
+            scope = {"backend": backend_scope, "target": observation.get("action_scope"),
+                     "view": observation["observation_id"], "policy": policy.identity}
+            action_id = fingerprint({"scope": scope, "action": action})
+            if effect == "approve" and grant != action_id:
+                state["pending_approval"] = action_id
+                state["pending_review"] = {"id": action_id, "tool": safe_summary(action["name"], 128),
+                    "arguments": review_arguments(action.get("arguments", {})), "reason": reason,
+                    "scope_id": fingerprint(scope), "created_at": time.time(), "expires_at": time.time() + APPROVAL_TTL}
+                _pause(state, "approval_required")
+                break
+            state.pop("pending_review", None)
+            # Repeated identical actions on an unchanged observed view signal no progress.
+            repeat_id = fingerprint({"view": observation["observation_id"], "action": action})
+            recent = state.setdefault("recent_actions", [])
+            if len(recent) >= 3 and all(item.get("repeat_id") == repeat_id for item in recent[-3:]):
+                _pause(state, "no_progress")
+                break
             # Write-ahead checkpoint: after crash, never replay this action blindly.
             state["pending_action"] = {"name": action["name"], "since": time.time()}
             event = tool_trace.begin(state, action["name"], observation.get("tools"))
             persist(path, state)
-            started = time.monotonic() if event is not None else None
+            started = time.monotonic()
+            phase = "action"
             result = desktop.act(action)
             if not isinstance(result, dict):
-                raise TypeError("Desktop action result must be a dict")
+                raise TypeError("Backend action result must be a dict")
+            ok = result.get("ok") is True
             if event is not None:
-                event["outcome"] = "ok" if result.get("ok") is True else "error"
+                event["outcome"] = "ok" if ok else "error"
                 event["duration_ms"] = round((time.monotonic() - started) * 1000, 3)
             state["steps"] += 1
+            discoveries = 0
             state["pending_action"] = None
-            state["last_result"] = {"ok": result.get("ok") is True,
-                                    "summary": str(result.get("summary", ""))[:200]}
-            state["failures"] = 0 if result.get("ok") is True else state["failures"] + 1
-            _record(state, "action", f"{action['name']}: {state['last_result']['ok']}")
+            state["last_result"] = {"ok": ok, "summary": safe_summary(result.get("summary", ""))}
+            known = {tool.get("name") for tool in observation.get("tools", []) if isinstance(tool, dict)}
+            recent.append({"tool": action["name"] if action["name"] in known else None,
+                           "ok": ok, "step": state["steps"], "repeat_id": repeat_id})
+            state["recent_actions"] = recent[-8:]
+            state["failures"] = 0 if ok else state["failures"] + 1
+            _record(state, "action", f"{action['name']}: {ok}")
             if state["failures"] >= 3:
-                state["status"] = "blocked"
-                _record(state, "blocked", "three consecutive failed actions")
+                state["status"], state["stop_reason"] = "blocked", "action_failures"
                 break
         except TokenBudgetExceeded:
-            state["status"] = "paused"
-            _record(state, "paused", "model token/call budget exhausted")
+            _pause(state, "model_budget_exhausted")
             break
         except Exception as exc:
             state["failures"] += 1
-            _record(state, "error", type(exc).__name__)
-            # No automatic retry of a potentially already-executed action.
+            detail = error_detail(exc, phase, bool(state["pending_action"]))
+            state["last_error"] = detail
+            state["last_result"] = {"ok": False, "summary": detail["message"], "code": detail["code"], "phase": phase}
+            _record(state, "error", f"{phase}: {detail['code']}")
             if state["pending_action"] or state["failures"] >= 3:
                 state["status"] = "blocked"
+                state["stop_reason"] = "reconciliation_required" if state["pending_action"] else "retry_required"
                 break
         finally:
             persist(path, state)
-    if state["status"] == "running":
-        state["status"] = "paused" if state["steps"] >= state["max_steps"] else "blocked"
-        _record(state, state["status"], "step budget exhausted")
     return persist(path, state)
-
-
