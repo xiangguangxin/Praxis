@@ -49,7 +49,9 @@ set `$env:OPENAS_TEST_BROWSER = "1"` before running the Python command.
 LiteLLM Proxy integration test additionally needs `OPENAS_TEST_LITELLM_EXECUTABLE`.
 
 The default CI matrix runs Python 3.10 and 3.12 on Linux, Windows and macOS. A
-separate Ubuntu job installs Chromium and enables browser integration tests.
+separate Ubuntu job selects an installed Chrome/Chromium (or provisions Chromium
+if missing) and enables browser integration tests. This avoids repeatedly installing
+system dependencies on runners that already provide a browser.
 Cross-platform unit checks do not establish native desktop E2E reliability.
 
 ## Real provider and desktop acceptance

@@ -36,8 +36,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -e ".[browser]"
-      - run: python -m playwright install --with-deps chromium
-      - run: praxis doctor --browser --check-model
+      - run: python scripts/provision_ci_browser.py
+      - run: praxis doctor --browser --browser-executable "$OPENAS_TEST_BROWSER_EXECUTABLE" --check-model
       - name: Evaluate real provider against local browser fixture
         shell: bash
         run: |
@@ -45,7 +45,7 @@ jobs:
           fixture_pid=$!
           trap 'kill "$fixture_pid"' EXIT
           python scripts/wait_for_fixture.py http://127.0.0.1:8765/
-          praxis-benchmark examples/live-coverage-suite.json --browser-url http://127.0.0.1:8765/ --repeat "$TRIALS" --output live-browser-report.json
+          praxis-benchmark examples/live-coverage-suite.json --browser-url http://127.0.0.1:8765/ --browser-executable "$OPENAS_TEST_BROWSER_EXECUTABLE" --repeat "$TRIALS" --output live-browser-report.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
