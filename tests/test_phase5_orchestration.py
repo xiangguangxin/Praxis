@@ -64,3 +64,36 @@ class Phase5OrchestrationTests(unittest.TestCase):
             result=runner.run()
             self.assertEqual(result["status"],"completed")
             self.assertEqual(result["results"]["a"]["verification"]["check"],"exists")
+
+    def test_dynamic_planner_replans_only_unfinished_work(self):
+        from praxis_agent.planning.dynamic import DynamicTaskPlanner
+        with tempfile.TemporaryDirectory() as d:
+            graph=TaskGraph([Task("setup","Setup"),Task("old","Old",("setup",))])
+            graph.transition("setup","running"); graph.transition("setup","completed")
+            seen={}
+            def propose(payload):
+                seen.update(payload)
+                return {"tasks":[{"id":"new","goal":"New step","dependencies":["setup"],
+                                  "acceptance":["new artifact exists"]}]}
+            planner=DynamicTaskPlanner(propose,max_tasks=5)
+            updated=planner.replan_remaining("Finish workflow",["Final report exists"],graph,
+                context={"last_error":"old route unavailable"})
+            self.assertEqual(updated.status,{"setup":"completed","new":"pending"})
+            self.assertEqual(seen["completed_tasks"][0]["id"],"setup")
+            self.assertEqual(seen["remaining_tasks"][0]["id"],"old")
+    def test_orchestrator_replan_with_persists_replacement(self):
+        from praxis_agent.planning.dynamic import DynamicTaskPlanner
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/"plan.json"
+            graph=TaskGraph([Task("done","Done"),Task("obsolete","Obsolete",("done",))])
+            runner=TaskOrchestrator(graph,lambda t:{"ok":True},lambda t,r:True,path)
+            runner.graph.transition("done","running"); runner.graph.transition("done","completed")
+            runner.status="paused"
+            planner=DynamicTaskPlanner(lambda payload:{"tasks":[
+                {"id":"replacement","goal":"Replacement","dependencies":["done"],
+                 "acceptance":["replacement output verified"]}]})
+            result=runner.replan_with(planner,"Overall goal",["Final output"],reason="Old path unavailable")
+            self.assertEqual(result["tasks"],{"done":"completed","replacement":"pending"})
+            resumed=TaskOrchestrator.resume(path,lambda t:{"ok":True},lambda t,r:True)
+            self.assertEqual(resumed.graph.tasks["done"].goal,"Done")
+            self.assertEqual(resumed.events[-1]["event"],"plan_replaced")
