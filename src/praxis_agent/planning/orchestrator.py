@@ -86,10 +86,12 @@ class TaskOrchestrator:
                 if self.graph.status[name] == "pending" and any(self.graph.status[d] in {"failed", "blocked"} for d in task.dependencies):
                     self.graph.transition(name, "blocked")
                     self._event("dependency_blocked", name, failed_id); changed = True
-    def run(self):
+    def run(self, *, max_tasks=None):
         if self.status in {"completed", "blocked"}: return self.snapshot()
+        budget = self.max_tasks if max_tasks is None else max_tasks
+        if type(budget) is not int or not 1 <= budget <= 1000: raise OrchestrationError("max_tasks must be 1..1000")
         processed = 0; self.status = "running"; self._save()
-        while processed < self.max_tasks:
+        while processed < budget:
             ready = self.graph.ready()
             if not ready:
                 states = set(self.graph.status.values())

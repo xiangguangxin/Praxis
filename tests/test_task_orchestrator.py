@@ -30,7 +30,7 @@ class TaskOrchestratorTests(unittest.TestCase):
             with self.assertRaises(OrchestrationError):
                 resumed.reconcile("a","completed",result={},verified=False)
             resumed.reconcile("a","retry")
-            self.assertEqual(resumed.run()["status"],"completed")
+            self.assertEqual(resumed.run(max_tasks=10)["status"],"completed")
     def test_budget_pause_and_resume(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/"p.json"; graph=TaskGraph([Task("a","A"),Task("b","B")]); calls=[]
