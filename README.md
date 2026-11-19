@@ -217,6 +217,6 @@ The library-level DAG orchestrator can run independent task callbacks concurrent
 
 ## Self-evolution
 
-Praxis keeps learning conservative and auditable: a strategy candidate must cite an active independently verified experience, pass paired baseline-vs-candidate benchmark evaluation with matching provenance, and be explicitly promoted before normal planners can retrieve it. Candidates are never silently activated. Promoted strategies remain untrusted hints; they cannot authorize tools or satisfy acceptance criteria. Rollback immediately removes a strategy from retrieval.
+Praxis keeps learning conservative and auditable: a strategy candidate must cite an active independently verified experience, pass paired baseline-vs-candidate benchmark evaluation with matching provenance, and be explicitly promoted before normal planners can retrieve it. Candidates are never silently activated. Promoted strategies remain untrusted hints; they cannot authorize tools or satisfy acceptance criteria. Rollback immediately removes a strategy from retrieval; a failed reassessment automatically suspends a regressing strategy.
 
 See the [Phase 6 self-evolution guide](RUNTIME.md#phase-6-evidence-gated-self-evolution) for the full proposal → paired evaluation → promotion → rollback workflow. This phase does not self-modify runtime source code.
