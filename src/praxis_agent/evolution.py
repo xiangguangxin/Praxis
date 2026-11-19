@@ -219,9 +219,8 @@ class EvolutionStore:
         terms = _terms(query)
         matches = []
         for item in self._read()["strategies"]:
-            eligible = item.get("status") == "promoted" or (
-                include_candidate_id is not None and item.get("id") == include_candidate_id
-                and item.get("status") == "candidate")
+            eligible = (item.get("status") == "promoted" if include_candidate_id is None
+                        else item.get("id") == include_candidate_id and item.get("status") == "candidate")
             if not eligible or item.get("environment") != environment:
                 continue
             overlap = len(terms & _terms(item.get("goal", "")))

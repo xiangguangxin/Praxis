@@ -53,6 +53,8 @@ class EvolutionLifecycleTests(unittest.TestCase):
         self.assertEqual(promoted["status"],"promoted")
         hints=self.store.search("coverage report",environment="linux-ci")
         self.assertEqual([item["id"] for item in hints],[self.strategy["id"]])
+        self.assertEqual(self.store.search("coverage report",environment="linux-ci",
+            include_candidate_id="another-candidate"),[])
 
     def test_planner_only_receives_promoted_strategies_unless_candidate_preview_requested(self):
         report={"provenance":self.report("baseline",5)["provenance"],
