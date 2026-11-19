@@ -174,7 +174,7 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             phase = "planning"
             if hasattr(planner, "prepare_plan"):
                 should_plan = not state.get("task_plan")
-                failed_since_plan = (state.get("last_result", {}).get("ok") is False
+                failed_since_plan = ((state.get("last_result") or {}).get("ok") is False
                                      and state.get("task_plan_at_step", -1) < state["steps"])
                 if should_plan or (failed_since_plan and state.get("task_plan_replans", 0) < 3):
                     try:
