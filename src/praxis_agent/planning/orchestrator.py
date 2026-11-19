@@ -119,6 +119,26 @@ class TaskOrchestrator:
         self._event("plan_replaced", "", reason + "; removed=" + ",".join(sorted(old_ids-new_ids)))
         self.status = "ready"; self._save()
         return self.snapshot()
+    def replan_with(self, planner, goal, criteria, *, context=None, reason):
+        """Ask a DynamicTaskPlanner for a new unfinished DAG and persist it."""
+        if self.status == "running":
+            raise OrchestrationError("Pause orchestration before replanning")
+        if not callable(getattr(planner, "replan_remaining", None)):
+            raise OrchestrationError("A DynamicTaskPlanner is required")
+        if not isinstance(reason, str) or not reason.strip():
+            raise OrchestrationError("A replan reason is required")
+        old_ids = set(self.graph.tasks)
+        try:
+            planner.replan_remaining(goal, criteria, self.graph, context=context)
+        except (TaskGraphError, ValueError) as exc:
+            raise OrchestrationError("Dynamic replan rejected: " + str(exc)) from exc
+        new_ids = set(self.graph.tasks)
+        self.attempts = {name: self.attempts.get(name, 0) for name in new_ids}
+        self.results = {name: value for name, value in self.results.items() if name in new_ids}
+        self._event("plan_replaced", "", reason + "; removed=" + ",".join(sorted(old_ids-new_ids)))
+        self.status = "ready"
+        self._save()
+        return self.snapshot()
     def run(self, *, max_tasks=None):
         if self.status in {"completed", "blocked"}: return self.snapshot()
         budget = self.max_tasks if max_tasks is None else max_tasks
