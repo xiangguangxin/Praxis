@@ -47,7 +47,7 @@ class PlannerAPI(BaseHTTPRequestHandler):
         observation = json.loads(request["messages"][1]["content"])
         self.requests.append(request)
         self.authorization.append(self.headers.get("Authorization"))
-        if "decompose the user goals" in request["messages"][0]["content"]:
+        if "decompose user goals" in request["messages"][0]["content"]:
             decision = {"tasks": [
                 {"id": "build", "goal": "Build instrumented fixture", "dependencies": []},
                 {"id": "run", "goal": "Run SIL cases", "dependencies": ["build"]},
