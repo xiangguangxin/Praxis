@@ -192,5 +192,5 @@ class ModelPlanner:
         remaining=self.max_tokens-spent if self.max_tokens else None
         if self.max_tokens and remaining<=estimated: raise TokenBudgetExceeded("Insufficient budget for next request")
         return self._request(messages,vision=any(x.get("type")=="image_url" for x in evidence),
-                             risk="high" if state.get("last_result",{}).get("ok") is False else "low",
+                             risk="high" if (state.get("last_result") or {}).get("ok") is False else "low",
                              max_tokens=max(1,remaining-estimated) if remaining else None)
