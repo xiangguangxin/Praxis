@@ -261,6 +261,8 @@ def main():
     parser.add_argument("--evolution-store", type=Path)
     parser.add_argument("--evolution-environment", default="")
     parser.add_argument("--strategy-candidate-id", help="Run paired baseline/strategy-candidate evaluation")
+    parser.add_argument("--allow-failures", action="store_true",
+                        help="Write evaluation reports even when benchmark success rate is below 100 percent")
     args = parser.parse_args()
     try:
         suite = json.loads(args.suite.read_text(encoding="utf-8"))["scenarios"]
@@ -293,7 +295,7 @@ def main():
     except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
         parser.error(str(exc))
     print(output)
-    if result["success_rate"] != 1:
+    if result["success_rate"] != 1 and not args.allow_failures:
         raise SystemExit(1)
 
 
