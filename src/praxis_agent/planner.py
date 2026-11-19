@@ -126,15 +126,15 @@ class ModelPlanner:
     @staticmethod
     def _infer_task_type(state):
         active = state.get("active_task") if isinstance(state.get("active_task"), dict) else {}
-        text = (str(active.get("goal", "")) + " " + str(state.get("goal", ""))).casefold()
+        text = str(active.get("goal") or state.get("goal", "")).casefold()
         if any(word in text for word in ("debug", "bug", "traceback", "error", "failure")):
             return "debugging"
-        if any(word in text for word in ("verify", "verification", "coverage", "test", "validate", "check", "report")):
-            return "verification"
         if any(word in text for word in ("screenshot", "visual", "layout", "inspect", "ui review")):
             return "visual_inspection"
-        if any(word in text for word in ("implement", "code", "script", "compile", "refactor")):
+        if any(word in text for word in ("implement", "code", "script", "compile", "refactor", "build")):
             return "code"
+        if any(word in text for word in ("verify", "verification", "coverage", "test", "validate", "check", "report")):
+            return "verification"
         if any(word in text for word in ("research", "search", "documentation", "lookup")):
             return "research"
         return "execution" if active else "planning"
