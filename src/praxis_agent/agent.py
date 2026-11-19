@@ -7,6 +7,7 @@ from .state import load, persist, _record, TERMINAL
 from .policy import ActionPolicy, fingerprint, review_arguments
 from .verifier import EvidenceOnlyVerifier
 from .verification import FileVerifier
+from .verifiers.registry import CriteriaVerifier
 from .locking import checkpoint_lock
 from .planner import TokenBudgetExceeded
 from .diagnostics import error_detail, safe_summary
@@ -26,10 +27,11 @@ def run(path: Path, desktop, planner, *, approval: bool = False, verifier=None,
 
 
 def _verify(state, verifier, evidence, observation):
-    if isinstance(verifier, FileVerifier):
+    if isinstance(verifier, (FileVerifier, CriteriaVerifier)):
         state["artifact_verification"] = verifier.evaluate(state)
         accepted = state["artifact_verification"]["passed"]
-        level, source = "independent_artifact", "file_verifier"
+        level, source = (("independent_artifact", "file_verifier") if isinstance(verifier, FileVerifier)
+                         else ("custom_verifier", "criteria_registry"))
         if not accepted:
             _record(state, "artifact_rejected", ", ".join(
                 check["status"] for check in state["artifact_verification"]["checks"].values()))
@@ -42,9 +44,10 @@ def _verify(state, verifier, evidence, observation):
         state["status"] = "completed"
         state["verification"] = {"level": level, "source": source, "checked_at": time.time(),
                                  "criteria_count": len(state["criteria"])}
+        if isinstance(verifier, (FileVerifier, CriteriaVerifier)):
+            state["verification"]["checks"] = state["artifact_verification"]["checks"]
         if isinstance(verifier, FileVerifier):
             state["verification"]["verifier_id"] = verifier.identity
-            state["verification"]["checks"] = state["artifact_verification"]["checks"]
         state["verification_level"] = level
         state["stop_reason"] = "criteria_satisfied"
         state["pending_action"] = None
@@ -90,6 +93,10 @@ def _prepare_start(path, *, approval, verifier, backend_scope, policy, approval_
         raise ValueError("Resume requires the original artifact verifier")
     if isinstance(verifier, FileVerifier):
         state["verifier_id"] = verifier.identity
+        verifier.prepare(state)
+    elif isinstance(verifier, CriteriaVerifier):
+        if state.get("artifact_baseline") is not None:
+            raise ValueError("Resume requires the original artifact verifier")
         verifier.prepare(state)
     elif state.get("artifact_baseline") is not None:
         raise ValueError("Resume requires the original artifact verifier")
@@ -159,7 +166,7 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                                          "observation_id": observation["observation_id"],
                                          "summary": safe_summary(observation.get("summary", ""))}
             # The action budget never prevents a final, read-only artifact check.
-            if state["steps"] >= state["max_steps"] and isinstance(verifier, FileVerifier):
+            if state["steps"] >= state["max_steps"] and isinstance(verifier, (FileVerifier, CriteriaVerifier)):
                 phase = "verification"
                 if not _verify(state, verifier, {}, observation):
                     _pause(state, "step_budget_exhausted")
