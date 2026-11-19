@@ -247,6 +247,7 @@ class TaskOrchestrator:
             raise OrchestrationError("max_tasks must be 1..1000")
         if type(workers) is not int or not 1 <= workers <= 32:
             raise OrchestrationError("max_workers must be 1..32")
+        self.max_workers = workers
         processed = 0
         self.status = "running"
         self._save()
