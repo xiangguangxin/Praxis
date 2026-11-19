@@ -409,6 +409,9 @@ The reusable `planning` package provides a checkpointed DAG orchestrator for wor
 - Failed nodes retry only within the configured attempt budget. Exhausted failures block descendants while independent branches can continue.
 - A running node found after process interruption becomes blocked and requires explicit reconciliation. The orchestrator never blindly replays an interrupted node.
 - Pending nodes can be added or removed, and unfinished work can be replaced by a newly proposed DAG. Completed nodes and their definitions are immutable across replans.
+- Independent ready nodes can execute concurrently with a bounded thread pool. Tasks declaring the same resource name are serialized; resource locks are shared across processes through lock files.
+- Each task result and verifier evidence is aggregated in the orchestration snapshot, including status counts and attempt totals.
+- The orchestrator checkpoint is process-locked during run, mutation and recovery, preventing two orchestrators from dispatching the same plan concurrently.
 - Every transition, retry, verification, mutation and replan is recorded in the atomic orchestration checkpoint.
 
 Library example:
@@ -419,11 +422,11 @@ from praxis_agent.planning import Task, TaskGraph, TaskOrchestrator, DynamicTask
 
 graph = TaskGraph([
     Task("build", "Build the instrumented application", (),
-         ("Fresh binary exists", "Build log has no errors")),
+         ("Fresh binary exists", "Build log has no errors"), ("build-output",)),
     Task("test", "Run the SIL suite", ("build",),
-         ("All required SIL cases passed",)),
+         ("All required SIL cases passed",), ("test-environment",)),
     Task("report", "Export the MC/DC report", ("test",),
-         ("New report exists and parses",)),
+         ("New report exists and parses",), ("report-output",)),
 ])
 
 orchestrator = TaskOrchestrator(
@@ -432,8 +435,9 @@ orchestrator = TaskOrchestrator(
     verify=verify_task,         # Independent verifier for this task
     checkpoint=Path("workflow.json"),
     max_attempts=2,
+    max_workers=3,
 )
-result = orchestrator.run(max_tasks=10)
+result = orchestrator.run(max_tasks=10, max_workers=3)
 
 # After a pause, load the exact checkpoint and resume.
 orchestrator = TaskOrchestrator.resume(
@@ -478,3 +482,17 @@ The SQLite scheduler migrates older job databases in place by adding lease metad
 - Explicit retry of a failed job clears prior results and resets its attempt budget.
 
 The worker renews leases on a daemon heartbeat thread while the injected job executor runs. Lease loss prevents that worker from publishing a result. The underlying GUI goal checkpoint lock and write-ahead action recovery remain the authority for safe resume; queue lease recovery never implies that an uncertain GUI action is safe to replay.
+
+
+### Parallel task execution and resource locks (Phase 5.4)
+
+The library-level `TaskOrchestrator` can execute independent DAG branches concurrently:
+
+- Set `max_workers` to a value from 1 to 32. The default remains 1 for backward compatibility.
+- Add `resources=("desktop:fixture", "output:/reports")` to a task to declare shared mutable resources. Tasks in the same DAG that share any resource are never scheduled in the same concurrent batch.
+- A `TaskLockManager` also acquires cross-process file locks for declared resources. The default lock directory is `.praxis-resource-locks` beside the task checkpoint; use the same explicit `resource_lock_dir` when separate orchestrators must coordinate across different checkpoint directories.
+- Resource names are opaque coordination keys, not access-control policies. They do not replace the GUI action policy, backend permissions, or filesystem sandboxing.
+- The injected `execute(task)` callback defines how a task is delegated. It can route work to separate model/backend instances or a worker pool; the orchestrator does not silently create additional model sessions.
+- The GUI `TaskPlanRuntime` remains single-task-at-a-time for one shared desktop session. Parallelism is intended for independent task adapters and separate execution contexts, not concurrent clicks in one desktop session.
+
+A snapshot includes an `aggregate` object with total tasks, counts by status and total attempts, alongside each task's result and verification evidence. The plan checkpoint is locked while it runs or is mutated; after a process interruption, every node recorded as running becomes blocked and requires explicit reconciliation.
