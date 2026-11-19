@@ -578,3 +578,24 @@ praxis run ./goal-state.json --browser-url http://127.0.0.1:8080/ \
 ```
 
 Set each profile's API key environment variable before running. The example model names and endpoint are placeholders. Route counts are recorded in model usage so benchmark runs can show which task types used each route. Task classification is a routing hint, not an authorization decision; every route still obeys capability, budget and action-policy checks.
+
+
+### Phase 6.4: Verified strategy extraction and drift guard
+
+Operator-curated `key_steps` and `preconditions` on an independently verified ExperienceStore record can now be converted into an inert strategy candidate:
+
+```sh
+praxis-evolution --store ./evolution.json extract \
+  --experience-store ./experiences.json --experience-id <experience-id>
+```
+
+Extraction does not infer hidden tool arguments or replay raw traces. It turns the operator-reviewed sequence into a bounded natural-language hint, and the resulting candidate still needs paired benchmark evaluation and explicit promotion.
+
+Promoted strategies can be reassessed against a fresh paired benchmark report:
+
+```sh
+praxis-evolution --store ./evolution.json reassess <strategy-id> \
+  --report ./fresh-paired-evaluation.json
+```
+
+If a promoted strategy fails the same paired evaluation gate, it is automatically suspended and disappears from planner retrieval. A passing reassessment refreshes its evaluation evidence. Suspended strategies can be rolled back for audit, but are never silently reactivated; a new candidate and promotion decision are required.

@@ -22,7 +22,9 @@ class EvolutionLifecycleTests(unittest.TestCase):
         verifier=FileVerifier({"report":{"path":"report.txt","contains":"PASS"}},self.root)
         self.experiences=ExperienceStore(self.root/"experiences.json")
         self.experience=self.experiences.add_verified(checkpoint,verifier=verifier,
-            environment="linux-ci",note="Verified report generation")
+            environment="linux-ci",note="Verified report generation",
+            preconditions=["fixture is available"],key_steps=["Open build summary","Generate report"],
+            failure_modes=["Do not skip the build wait"])
         self.store=EvolutionStore(self.root/"evolution.json",self.experiences)
         self.strategy=self.store.propose(goal="Generate a verified coverage report",
             environment="linux-ci",instruction="Check the build summary before opening the report.",
@@ -40,6 +42,12 @@ class EvolutionLifecycleTests(unittest.TestCase):
             "os":"Linux","architecture":"x86_64","repeat":10,
             "model_connection":"litellm","model_budget":{"max_calls":30,"max_tokens":50000}},
             "records":records}
+
+    def test_verified_experience_can_be_extracted_into_inert_candidate(self):
+        candidate=self.store.extract_candidate(self.experience["id"])
+        self.assertEqual(candidate["status"],"candidate")
+        self.assertIn("Open build summary -> Generate report",candidate["instruction"])
+        self.assertEqual(self.store.search("coverage report",environment="linux-ci"),[])
 
     def test_candidate_requires_paired_benchmark_before_promotion(self):
         self.assertEqual(self.store.search("coverage report",environment="linux-ci"),[])
@@ -119,6 +127,18 @@ class EvolutionLifecycleTests(unittest.TestCase):
         candidate["records"].append(candidate["records"][0])
         with self.assertRaises(EvolutionError):
             self.store.evaluate(self.strategy["id"],baseline,candidate)
+
+    def test_failed_reassessment_suspends_promoted_strategy_automatically(self):
+        report={"provenance":self.report("baseline",5)["provenance"],
+                "records":self.report("baseline",5)["records"]+self.report("strategy_candidate",8)["records"]}
+        self.store.evaluate_variants(self.strategy["id"],report)
+        self.store.promote(self.strategy["id"])
+        regression={"provenance":self.report("baseline",8)["provenance"],
+                    "records":self.report("baseline",8)["records"]+self.report("strategy_candidate",7)["records"]}
+        result=self.store.evaluate_variants(self.strategy["id"],regression)
+        self.assertFalse(result["passed"])
+        self.assertEqual(self.store.list(status="suspended")[0]["id"],self.strategy["id"])
+        self.assertEqual(self.store.search("coverage report",environment="linux-ci"),[])
 
     def test_rollback_removes_strategy_from_retrieval(self):
         report={"provenance":self.report("baseline",5)["provenance"],

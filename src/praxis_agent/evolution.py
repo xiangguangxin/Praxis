@@ -126,6 +126,30 @@ class EvolutionStore:
             return {**report, "records": subset}
         return self.evaluate(strategy_id, selected(baseline_variant), selected(candidate_variant))
 
+    def extract_candidate(self, experience_id: str) -> dict:
+        """Turn operator-curated steps from a verified experience into an inert candidate."""
+        if self.experience_store is None:
+            raise EvolutionError("An ExperienceStore is required for extraction")
+        source = next((entry for entry in self.experience_store._read()["experiences"]
+                       if entry.get("id") == experience_id), None)
+        if (source is None or source.get("source") != "independently-verified"
+                or source.get("status", "active") != "active"):
+            raise EvolutionError("Extraction requires an active independently verified experience")
+        steps = source.get("key_steps", [])
+        preconditions = source.get("preconditions", [])
+        if not isinstance(steps, list) or not steps:
+            raise EvolutionError("Experience must contain operator-curated key_steps")
+        instruction = "For a similar goal, first confirm these preconditions: " + (
+            "; ".join(preconditions) if preconditions else "reobserve the current application state"
+        ) + ". Then consider this verified sequence: " + " -> ".join(steps) + (
+            ". Reobserve after each action and independently verify the final artifact."
+        )
+        if len(instruction) > 600:
+            raise EvolutionError("Extracted strategy exceeds the 600-character instruction limit")
+        rationale = "Extracted from operator-curated steps in independently verified experience " + experience_id
+        return self.propose(goal=source["goal"], environment=source["environment"],
+            instruction=instruction, source_experience_id=experience_id, rationale=rationale)
+
     def evaluate(self, strategy_id: str, baseline_report, candidate_report) -> dict:
         baseline, candidate = self._report(baseline_report), self._report(candidate_report)
         if self._signature(baseline) != self._signature(candidate):
@@ -167,9 +191,16 @@ class EvolutionStore:
         with checkpoint_lock(self.path):
             data = self._read()
             item = self._find(data, strategy_id)
-            if item["status"] != "candidate":
-                raise EvolutionError("Only candidate strategies can be evaluated")
+            if item["status"] not in ("candidate", "promoted"):
+                raise EvolutionError("Only candidate or promoted strategies can be evaluated")
+            prior_status = item["status"]
             item["evaluation"] = evaluation
+            if prior_status == "promoted" and not evaluation["passed"]:
+                item["status"] = "suspended"
+                item["suspended_at"] = time.time()
+                item["suspension_reason"] = "paired benchmark gate failed"
+            elif prior_status == "promoted":
+                item["last_reassessed_at"] = time.time()
             self._write(data)
         return evaluation
 
@@ -203,8 +234,8 @@ class EvolutionStore:
         with checkpoint_lock(self.path):
             data = self._read()
             item = self._find(data, strategy_id)
-            if item["status"] != "promoted":
-                raise EvolutionError("Only promoted strategies can be rolled back")
+            if item["status"] not in ("promoted", "suspended"):
+                raise EvolutionError("Only promoted or suspended strategies can be rolled back")
             item["status"], item["rollback_reason"] = "rolled_back", reason[:300]
             item["rolled_back_at"] = time.time()
             self._write(data)
