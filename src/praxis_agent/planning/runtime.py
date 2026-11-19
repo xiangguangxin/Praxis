@@ -48,11 +48,17 @@ class TaskPlanRuntime:
                 raise TaskRuntimeError("Replacement must preserve completed task definitions and status")
         if any(status != "pending" for name, status in replacement.status.items() if name not in completed):
             raise TaskRuntimeError("Replacement unfinished tasks must all start pending")
+        allowed, covered = set(self.criteria), set()
+        for task in replacement.tasks.values():
+            if not task.acceptance or not set(task.acceptance).issubset(allowed):
+                raise TaskRuntimeError("Replacement task acceptance must match Goal criteria")
+            covered.update(task.acceptance)
+        if covered != allowed:
+            raise TaskRuntimeError("Replacement plan must cover every Goal criterion")
         self.graph = replacement
         self.attempts = {name: self.attempts.get(name, 0) for name in self.graph.tasks}
         self.results = {name: value for name, value in self.results.items() if name in completed}
         self.baselines = {name: value for name, value in self.baselines.items() if name in completed}
-        self._validate_acceptance()
         self._event("remaining_plan_replaced", "", "preserved " + str(len(completed)) + " completed tasks")
 
     def _validate_acceptance(self):
