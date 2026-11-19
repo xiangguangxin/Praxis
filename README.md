@@ -185,9 +185,9 @@ Praxis 从 OpenAS 的 GUI Agent Runtime 独立而来，目前支持 **Nova MCP �
 
 使用 `pip install -e .` 安装，运行 `praxis --help`，完整参数参考 [RUNTIME.md](RUNTIME.md)。OpenAS 继续维护 Agents & Skills，与 Praxis 以工具集成形式协作。
 
-## Integrated planning, model routing and scheduled jobs
+## Integrated planning, verified task execution, model routing and scheduled jobs
 
-The GUI execution loop can now call `ModelPlanner.prepare_plan()` before its first action and checkpoint the validated task DAG. After a failed action, it may request a bounded revised plan (up to three replans). The plan is guidance only: each GUI action still requires a fresh observation, schema validation and the existing approval policy.
+The GUI execution loop can call `ModelPlanner.prepare_plan()` before its first action and checkpoint the task DAG. With an independent `--verifier` configuration and task acceptance entries mapped exactly to Goal criteria, Praxis activates tasks in dependency order and independently verifies each `task_complete` request. Failed checks retry within a bounded budget; exhausted failures block dependents. Task progress and per-task fresh-artifact baselines are stored in the Goal checkpoint. Plans without an independent verifier or valid acceptance mapping remain advisory. Every GUI action still uses fresh observation, schema validation, operator policy and approval gates.
 
 Optional model routing uses a JSON profile file:
 

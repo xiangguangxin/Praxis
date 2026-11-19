@@ -201,7 +201,16 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             # The action budget never prevents a final, read-only artifact check.
             if state["steps"] >= state["max_steps"] and isinstance(verifier, (FileVerifier, CriteriaVerifier)):
                 phase = "verification"
-                if not _verify(state, verifier, {}, observation):
+                task_status = None
+                if state.get("task_runtime"):
+                    task_status = TaskPlanRuntime(state["task_plan"], state["criteria"],
+                                                  data=state["task_runtime"]).status
+                if task_status == "blocked":
+                    state["status"], state["stop_reason"] = "blocked", "task_plan_blocked"
+                    _record(state, "task_plan_blocked", "Task retry budget exhausted")
+                elif task_status not in (None, "completed"):
+                    _pause(state, "step_budget_exhausted")
+                elif not _verify(state, verifier, {}, observation):
                     _pause(state, "step_budget_exhausted")
                 break
             phase = "planning"
