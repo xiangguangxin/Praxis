@@ -16,7 +16,7 @@ class WorkerLeaseTests(unittest.TestCase):
         self.scheduler=Scheduler(self.db)
 
     def test_claim_heartbeat_and_fenced_finish(self):
-        job=self.scheduler.enqueue("long job")
+        job=self.scheduler.enqueue("long job",run_at=0)
         first=self.scheduler.claim(now=100,lease_seconds=10,owner="worker-a")
         self.assertEqual(first["attempts"],1)
         beat=self.scheduler.heartbeat(job["id"],lease_token=first["lease_token"],
@@ -33,7 +33,7 @@ class WorkerLeaseTests(unittest.TestCase):
         self.assertEqual(self.scheduler.get(job["id"])["status"],"completed")
 
     def test_expired_lease_is_requeued_until_attempt_limit(self):
-        job=self.scheduler.enqueue("crash recovery",max_attempts=2)
+        job=self.scheduler.enqueue("crash recovery",run_at=0,max_attempts=2)
         first=self.scheduler.claim(now=100,lease_seconds=10)
         second=self.scheduler.claim(now=111,lease_seconds=10)
         self.assertEqual(second["id"],job["id"])
@@ -69,7 +69,7 @@ class WorkerLeaseTests(unittest.TestCase):
         self.assertGreater(stored["heartbeat_at"],stored["started_at"])
 
     def test_stale_worker_cannot_overwrite_reclaimed_job(self):
-        job=self.scheduler.enqueue("fenced")
+        job=self.scheduler.enqueue("fenced",run_at=0)
         first=self.scheduler.claim(lease_seconds=10,owner="old-worker")
         other=Scheduler(self.db)
         second=other.claim(now=first["lease_expires_at"]+1,lease_seconds=10,owner="new-worker")
