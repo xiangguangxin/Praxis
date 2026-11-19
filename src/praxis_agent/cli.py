@@ -177,7 +177,7 @@ def _execute(args):
                            experience_environment=args.experience_environment, model_router=router,
                            evolution_store=__import__("praxis_agent.evolution", fromlist=["EvolutionStore"]).EvolutionStore(args.evolution_store) if args.evolution_store else None,
                            evolution_environment=args.evolution_environment,
-                           strategy_candidate_id=args.strategy_candidate_id)
+                           strategy_candidate_id=getattr(args, "strategy_candidate_id", None))
     verifier = FileVerifier.from_json(args.verifier) if args.verifier else None
     from .policy import fingerprint
     scope = (browser_scope(args.browser_url, download_dir) if args.browser_url else

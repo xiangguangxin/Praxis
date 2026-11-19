@@ -94,6 +94,7 @@ def _record(case, index, variant, state, verifier, actions, elapsed):
         "input_tokens": usage.get("input_tokens", 0), "output_tokens": usage.get("output_tokens", 0),
         "usage_missing_calls": usage.get("usage_missing_calls", 0),
         "experience_hint_calls": usage.get("experience_hint_calls", 0),
+        "strategy_hint_calls": usage.get("strategy_hint_calls", 0),
         "estimated_input_tokens": usage.get("estimated_input_tokens", 0),
         "elapsed_seconds": round(elapsed, 4),
         **trajectory,
@@ -114,6 +115,7 @@ def _metrics(records, synthetic):
         if usage_complete else None,
         "usage_missing_calls": sum(item["usage_missing_calls"] for item in records),
         "experience_hint_calls": sum(item["experience_hint_calls"] for item in records),
+        "strategy_hint_calls": sum(item.get("strategy_hint_calls", 0) for item in records),
     }
 
 
@@ -179,6 +181,12 @@ def live_benchmark(scenarios, args):
             raise ValueError(f"{case['name']}: scripted outputs, actions and interruption are offline only")
     connection = resolve_model_connection(args)
     experience = ExperienceStore(args.experience_store) if args.experience_store else None
+    from .evolution import EvolutionStore
+    evolution = EvolutionStore(args.evolution_store, experience) if args.evolution_store else None
+    if bool(evolution) != bool(args.evolution_environment):
+        raise ValueError("--evolution-store and --evolution-environment must be used together")
+    if args.strategy_candidate_id and not evolution:
+        raise ValueError("--strategy-candidate-id requires --evolution-store")
     provenance = manifest(scenarios, args.repeat)
     provenance["model_connection"] = connection.kind
     provenance["model_budget"] = {"max_calls": args.max_model_calls, "max_tokens": args.max_model_tokens}
@@ -187,7 +195,11 @@ def live_benchmark(scenarios, args):
     records = []
     for case in scenarios:
         for index in range(args.repeat):
-            variants = ["baseline", "experience"] if experience is not None else ["baseline"]
+            variants = ["baseline"]
+            if experience is not None:
+                variants.append("experience")
+            if args.strategy_candidate_id:
+                variants.append("strategy_candidate")
             # Alternate which run sees the application first within each pair.
             if index % 2:
                 variants.reverse()
@@ -205,7 +217,10 @@ def live_benchmark(scenarios, args):
                                            max_calls=args.max_model_calls,
                                            max_tokens=args.max_model_tokens,
                                            experience_store=experience if variant == "experience" else None,
-                                           experience_environment=args.experience_environment)
+                                           experience_environment=args.experience_environment,
+                                           evolution_store=evolution if variant == "strategy_candidate" else None,
+                                           evolution_environment=args.evolution_environment if variant == "strategy_candidate" else "",
+                                           strategy_candidate_id=args.strategy_candidate_id if variant == "strategy_candidate" else None)
                     from .policy import ActionPolicy, fingerprint
                     policy_path = getattr(args, "policy", None)
                     policy = ActionPolicy.from_json(policy_path) if policy_path else ActionPolicy()
@@ -243,6 +258,9 @@ def main():
     parser.add_argument("--max-model-tokens", type=int, default=50_000)
     parser.add_argument("--experience-store", type=Path)
     parser.add_argument("--experience-environment", default="")
+    parser.add_argument("--evolution-store", type=Path)
+    parser.add_argument("--evolution-environment", default="")
+    parser.add_argument("--strategy-candidate-id", help="Run paired baseline/strategy-candidate evaluation")
     args = parser.parse_args()
     try:
         suite = json.loads(args.suite.read_text(encoding="utf-8"))["scenarios"]
@@ -253,13 +271,19 @@ def main():
                 raise ValueError("--browser-executable requires --browser-url")
             if bool(args.experience_store) != bool(args.experience_environment):
                 raise ValueError("--experience-store and --experience-environment must be used together")
+            if bool(args.evolution_store) != bool(args.evolution_environment):
+                raise ValueError("--evolution-store and --evolution-environment must be used together")
+            if args.strategy_candidate_id and not args.evolution_store:
+                raise ValueError("--strategy-candidate-id requires --evolution-store")
             if min(args.max_model_calls, args.max_model_tokens) < 0:
                 raise ValueError("Model limits must be nonnegative")
             result = live_benchmark(suite, args)
         else:
             if args.litellm_base_url is not None:
                 raise ValueError("--litellm-base-url requires a live backend")
-            if args.experience_store or args.experience_environment or args.browser_executable or args.policy:
+            if (args.experience_store or args.experience_environment or args.evolution_store
+                    or args.evolution_environment or args.strategy_candidate_id
+                    or args.browser_executable or args.policy):
                 raise ValueError("Experience and browser options require a live backend")
             result = benchmark(suite, repeat=args.repeat)
         output = json.dumps(result, ensure_ascii=False, indent=2)
