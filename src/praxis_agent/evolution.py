@@ -184,7 +184,7 @@ class EvolutionStore:
         with checkpoint_lock(self.path):
             data = self._read()
             item = self._find(data, strategy_id)
-            if item["status"] != "candidate" or not item.get("evaluation", {}).get("passed"):
+            if item["status"] != "candidate" or not (item.get("evaluation") or {}).get("passed"):
                 raise EvolutionError("Promotion requires a passing paired benchmark evaluation")
             if self.experience_store is None:
                 raise EvolutionError("Promotion requires rechecking the source ExperienceStore")
