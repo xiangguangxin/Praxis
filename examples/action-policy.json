@@ -1,0 +1,14 @@
+{
+  "rules": [
+    {
+      "tool": "browser_click",
+      "arguments": {"role": "button", "name": "Submit test fixture"},
+      "effect": "allow"
+    },
+    {
+      "tool": "browser_click",
+      "arguments": {"role": "button", "name": "Delete account"},
+      "effect": "deny"
+    }
+  ]
+}

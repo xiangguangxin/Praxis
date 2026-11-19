@@ -12,7 +12,7 @@ license = {text = "MIT"}
 authors = [{name = "Praxis contributors"}]
 keywords = ["agent", "runtime", "gui", "automation", "verification"]
 classifiers = ["Programming Language :: Python :: 3", "License :: OSI Approved :: MIT License"]
-dependencies = []
+dependencies = ["jsonschema>=4.23,<5"]
 
 [project.optional-dependencies]
 browser = ["playwright>=1.49,<2"]

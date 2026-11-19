@@ -57,9 +57,10 @@ class Browser:
             self.opened = True
         self._check_page()
         address = urlsplit(self.page.url)
+        tree = self.page.locator("body").aria_snapshot(timeout=self.timeout)[:5000]
         return {"summary": f"Browser page {address.path or '/'}",
                 "action_scope": self.page.url,
-                "ui_tree": self.page.locator("body").aria_snapshot(timeout=self.timeout)[:5000],
+                "ui_tree": tree,
                 "tools": list(self.tools)}
 
     def _download_target(self, filename):
@@ -134,7 +135,10 @@ def open_browser(start_url, download_dir=None, executable=None):
         if not download_dir.is_dir():
             raise ValueError("Expected a download directory")
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(executable_path=executable)
+        try:
+            browser = playwright.chromium.launch(executable_path=executable)
+        except Exception as exc:
+            raise RuntimeError("Chromium could not start; check local execution permissions and praxis doctor --browser") from exc
         try:
             context = browser.new_context(accept_downloads=True, service_workers="block")
             try:

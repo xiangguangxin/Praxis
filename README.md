@@ -10,7 +10,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-059669)](LICENSE)
 
-[Quick start](#quick-start) · [Architecture](#architecture) · [Verification](#independent-verification) · [Experience](#experience-memory) · [Benchmarks](#benchmark--evaluation) · [中文](#中文介绍)
+[Demo & acceptance](docs/ACCEPTANCE.md) · [Quick start](#quick-start) · [Architecture](#architecture) · [Verification](#independent-verification) · [Experience](#experience-memory) · [Benchmarks](#benchmark--evaluation) · [中文](#中文介绍)
 
 </div>
 
@@ -38,6 +38,7 @@ cd Praxis
 python -m pip install -e .
 praxis create ./goal-state.json --goal "Inspect an authorized app" --criterion "Expected output verified"
 praxis status ./goal-state.json
+praxis doctor
 ```
 
 Set `PRAXIS_MODEL` and `PRAXIS_API_KEY` (or the backwards-compatible `OPENAS_GUI_MODEL` and `OPENAS_GUI_API_KEY`). For a Nova desktop session:
@@ -59,6 +60,21 @@ praxis run ./goal-state.json --browser-url https://example.com/
 
 Only test web apps you are authorized to automate. Browser execution uses an isolated, nonpersistent context and is not a security sandbox for hostile websites.
 
+## Try a complete browser goal
+
+```bash
+python -m pip install -e ".[browser]"
+python -m playwright install chromium
+praxis doctor --browser
+praxis demo --output ./demo-run
+```
+
+Open `demo-run/index.html` for the actual final screenshot, downloaded report and
+independent verification results. This is a **real Chromium integration demo with
+a deterministic fixture planner**, requiring no API key. It is not a real-model
+success-rate claim. [Reproduce it or run live acceptance](docs/ACCEPTANCE.md).
+See the [recorded validation and downloadable demo](docs/VALIDATION.md).
+
 ## Architecture
 
 ```mermaid
@@ -78,6 +94,11 @@ flowchart TD
     E["Local ExperienceStore (opt-in)"] -.-> P
 ```
 
+Completion records a `verification_level`: `model_evidence`,
+`independent_artifact`, or `custom_verifier`. Legacy completed checkpoints without
+provenance read as `legacy_unspecified`. The CLI exits with 0 for completed, 3 for
+paused, 4 for blocked and 5 for failed execution.
+
 The planner may assert completion; **without an independent verifier**, this is model-evidence compatibility mode rather than independently established success. If an action's outcome is uncertain after a crash, Praxis blocks replay until the operator reconciles it.
 
 ## Independent verification
@@ -92,6 +113,26 @@ praxis reconcile ./goal-state.json --outcome executed --note "Independently chec
 
 The local file verifier supports safe root-constrained paths, minimum size, content checks, JSON fields, changed-artifact freshness and run IDs. It does **not** prove visual UI correctness by itself. See [verifier fixtures](examples/coverage-artifact-verifier.json) and the [full runtime guide](RUNTIME.md).
 
+## Review and recovery
+
+Advertised tool schemas are validated locally before dispatch; unknown tools or
+invalid arguments never reach the backend. Remote schema references are not fetched.
+
+Sensitive tool names, control targets and executable payloads trigger review even
+when a planner labels them low impact. `praxis status` exposes a redacted
+`pending_review` with its exact fingerprint and expiry. Review the actual target
+before resuming with `--approve-pending --approval-id <fingerprint>`. A changed
+observed view, action, policy or backend requires a new review. Keep passing the
+same `--policy` and `--verifier` on resume.
+
+Trusted operator policies support exact argument matches with `allow`, `approve`
+and `deny` effects. See [policy example](examples/action-policy.json) and
+[approval and recovery details](RUNTIME.md#reviewable-approval-and-action-policy).
+Policies aid authorization; they are not a security sandbox and cannot infer all
+UI effects. `praxis retry` reopens known-outcome failures; uncertain in-flight
+actions still require `praxis reconcile`. Ctrl+C persists a paused or blocked state;
+backend bindings are checked before a new session starts.
+
 ## Experience memory
 
 Successful runs can become **curated** experiences only after trusted file verification, with operator-provided notes. Prior experiences are *untrusted planning hints* and are **never automatically replayed**.
@@ -104,7 +145,9 @@ praxis run ./goal-state.json --nova /absolute/path/to/nova \
   --experience-store ./experiences.json --experience-environment win11-app-v1
 ```
 
-Matching uses simple lexical overlap and exact environment tags, not embeddings. Default confidence half-life: 30 days; retention eligibility: 90 days; two explicitly recorded verified failures invalidate an experience. The JSON store is **single-writer** and neither encrypted nor access-controlled.
+Matching uses simple lexical overlap and exact environment tags, not embeddings. Default confidence half-life: 30 days; retention eligibility: 90 days; two explicitly recorded verified failures invalidate an experience. Experience writes use a process lock. The store is neither encrypted nor
+access-controlled. Curated entries can include preconditions, key steps, failure
+modes and independent verification references; these remain untrusted planning hints.
 
 ## Benchmark & evaluation
 
@@ -122,7 +165,11 @@ Offline fixtures are synthetic and must not be presented as real desktop success
 
 **Not guaranteed:** continuous background execution, remote distributed scheduling, zero-configuration providers, general-purpose sandboxing, unsupervised experience learning, real Windows/macOS E2E reliability, or permissionless tool access.
 
-**Next:** independent CI, reproducible live desktop acceptance, richer verified observation, and adapter contracts for future CLI/tool environments. API compatibility is not yet frozen.
+**Validation:** CI runs Linux/Windows/macOS unit checks and real Chromium
+integration with a scripted model. A separate manual workflow supports real-model
+browser acceptance and configured Nova desktop runners. See the
+[acceptance guide](docs/ACCEPTANCE.md). General desktop reliability still requires
+measured native application trials. API compatibility is not yet frozen.
 
 The project was extracted from [OpenAS](https://github.com/xiangguangxin/OpenAS). See [migration and compatibility notes](MIGRATION.md), [detailed documentation](RUNTIME.md) and the [MIT license](LICENSE).
 

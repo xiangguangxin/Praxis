@@ -11,12 +11,24 @@ import tempfile
 
 RUNTIME = Path(__file__).resolve().parents[1]
 MUTATIONS = (
+    ("skip-tool-contract", "agent.py", 'validate_action(action, observation.get("tools"))', "pass",
+     "test_dispatch_recovery.DispatchRecoveryTests.test_planner_can_correct_a_rejected_action_without_spending_a_step"),
+    ("coerce-policy-boolean", "policy.py", 'fingerprint(rule["arguments"]) == fingerprint(args)',
+     'rule["arguments"] == args', "test_dispatch_recovery.DispatchRecoveryTests.test_policy_boolean_allow_does_not_match_numeric_argument"),
+    ("overwrite-competing-checkpoint", "storage.py", 'os.link(temporary, path)', 'os.replace(temporary, path)',
+     "test_dispatch_recovery.DispatchRecoveryTests.test_create_only_publication_never_overwrites_competing_file"),
+    ("ignore-sensitive-control-target", "policy.py", "if any(_sensitive(value) for value in targets):", "if False:",
+     "test_reliability.ReliabilityTests.test_generic_click_sensitive_targets_need_review_in_both_languages"),
+    ("skip-action-budget", "agent.py", 'if state["steps"] >= state["max_steps"]:', "if False:",
+     "test_reliability.ReliabilityTests.test_budget_never_permits_an_extra_mutation"),
+    ("hide-tools-after-twelve", "planner.py", "for tool in (tools if limit is None else tools[:limit]):",
+     "for tool in tools[:12]:", "test_reliability.ReliabilityTests.test_tool_after_twelfth_can_be_discovered_with_full_schema"),
     ("accept-stale-artifact", "verification.py", 'return "stale_artifact", evidence',
      'return "passed", evidence', "test_artifact_acceptance.CoverageAcceptanceTests.test_stale_report_cannot_pass"),
     ("ignore-action-count", "tool_trace.py", "if counts[tool] > maximum:", "if False:",
      "test_tool_trajectory.ToolTrajectoryTests.test_verified_file_does_not_hide_extra_dispatch"),
-    ("skip-reconciliation", "agent.py", 'if state.get("pending_action"):', "if False:",
-     "test_artifact_acceptance.CoverageAcceptanceTests.test_interrupted_action_preserves_baseline_and_does_not_repeat"),
+    ("skip-reconciliation", "agent.py", '    if state.get("pending_action"):\n        # A crash',
+     '    if False:\n        # A crash', "test_recovery_verification.Tests.test_crash_requires_human_reconcile"),
 )
 
 

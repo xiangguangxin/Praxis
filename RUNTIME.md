@@ -15,7 +15,7 @@ Restart with the same checkpoint to resume. A crash during an in-flight action b
 
 ## Phase 3: recover safely
 
-Version 2 checkpoints migrate version 1 on write. A process-level lock prevents concurrent runs on the same checkpoint. If a process dies after dispatching a potentially non-idempotent action, the next run becomes blocked. Inspect the desktop and reconcile manually:
+Version 2 checkpoints migrate version 1 on write. A process-level lock prevents concurrent runs on the same checkpoint. If a process dies after dispatching a potentially non-idempotent action, the next run becomes blocked. A terminated process may leave a running checkpoint with a pending action; after independently checking the target, reconcile it directly (the checkpoint lock must be available):
 
 ```sh
 praxis reconcile ./goal-state.json --outcome executed --note "Checked the UI and confirmed the action happened"
@@ -107,7 +107,7 @@ praxis run ./goal-state.json --nova /absolute/path/to/nova \
 
 `--max-model-calls` and `--max-model-tokens` are optional (0 means no limit). If a budget is reached, the agent **pauses** instead of retrying indefinitely. Model usage is saved in checkpoint `model_usage` and carries over to `resume`. When the provider reports `usage.prompt_tokens` and `usage.completion_tokens`, those are tracked as actual usage. If it omits usage, input is roughly estimated by character count, tracked separately, and output tokens are unknown. Token budgets are best-effort guards, not strict billing caps: a single request can overshoot a remaining budget, images have provider-specific costs, and requests that fail before returning usage may be unaccounted for. The model endpoint may bill for attempted requests.
 
-The compact tool list currently includes the first 12 advertised MCP tools, so check tool ordering and availability before relying on less common Nova tools. For accurate before/after savings, compare `model_usage` across equivalent runs with the same model, UI, and goal. Real Nova Windows/macOS E2E testing is still outstanding.
+The planner receives a paged tool directory and selected complete schemas; use internal discovery to load tools beyond the current page. For accurate before/after savings, compare `model_usage` across equivalent runs with the same model, UI, and goal. Real Nova Windows/macOS E2E testing is still outstanding.
 
 ## Agent Benchmark
 
@@ -193,7 +193,7 @@ praxis-experience --store ./experiences.json search "coverage report" \
   --environment win11-coverage-v1
 ```
 
-Only use verifier configurations you trust. The store is a local file with no multi-process locking, access control, or encryption; keep it in a trusted directory and do not share it with untrusted users. Environment tags are exact matches and retrieval is simple word overlap (not embeddings). By default experiences are **not injected into the planner**, and success in one environment does not authorize replay in another.
+Only use verifier configurations you trust. The store is a local file with process-serialized writes but no access control or encryption; keep it in a trusted directory and do not share it with untrusted users. Environment tags are exact matches and retrieval is simple word overlap (not embeddings). By default experiences are **not injected into the planner**, and success in one environment does not authorize replay in another.
 
 ## Opt-in experience-assisted planning and lifecycle
 
@@ -214,4 +214,161 @@ praxis-experience --store ./experiences.json invalidate EXPERIENCE_ID \
 praxis-experience --store ./experiences.json expire
 ```
 
-The CLI cannot independently establish that feedback is true: operators must check their evidence before submitting feedback. Environment tags should include relevant OS, app and workflow versions. The store remains single-writer local JSON; avoid concurrent writers. Hints may include operator notes, so do not store secrets. This is a first-stage retrieval/lifecycle implementation, not autonomous experience learning or real-world success-rate proof.
+The CLI cannot independently establish that feedback is true: operators must check their evidence before submitting feedback. Environment tags should include relevant OS, app and workflow versions. The store remains local JSON; process locks serialize writers on one host. Hints may include operator notes, so do not store secrets. This is a first-stage retrieval/lifecycle implementation, not autonomous experience learning or real-world success-rate proof.
+
+
+## Reviewable approval and action policy
+
+The host classifies both tool names and locator/command arguments. Generic clicks
+on controls such as `Send`, `Delete account`, `确认付款` and `发送消息` require review
+regardless of the planner's low-impact classification. Executable payloads and
+ambiguous submission shortcuts also require review. Heuristics cannot determine
+all effects of arbitrary controls: use an operator-owned policy for critical workflows.
+
+```bash
+praxis run goal.json --browser-url https://example.com --policy examples/action-policy.json
+praxis status goal.json
+praxis resume goal.json --browser-url https://example.com --policy examples/action-policy.json \
+  --approve-pending --approval-id FINGERPRINT_FROM_PENDING_REVIEW
+```
+
+A policy rule matches one tool and its **entire** argument object. Extra arguments
+or another target do not match. Effects are `allow`, `approve` and `deny`; deny wins
+over conflicting matches. Policies bind to the checkpoint and cannot silently
+change on resume. An allow is explicit operator authorization, so use exact test
+fixture targets instead of broad production actions.
+
+`pending_review` contains the tool, bounded target locators, reason, request ID,
+context fingerprint and a ten-minute expiry. Text values, executable payloads and
+credentials are redacted; URL credentials, queries and fragments are omitted.
+Raw executable arguments are not stored. After approval the planner reobserves and
+reproposes an action. Only an identical action in the same observed view/backend
+can consume the grant, and only on the immediately following decision. A changed
+view or action produces a new request. Dynamic pages may therefore require a new
+review. Legacy hash-only approvals require a new review as well.
+
+## Completion, diagnostics and recovery
+
+| `verification_level` | Meaning |
+| --- | --- |
+| `unverified` | No successful completion check |
+| `model_evidence` | Model-supplied criterion strings; not independent proof |
+| `independent_artifact` | Bound local file verifier passed; checks and identity recorded |
+| `custom_verifier` | Caller-supplied verifier returned true; independence is caller-defined |
+| `legacy_unspecified` | Older completed checkpoint has no verification provenance |
+
+A final read-only observation and artifact check remain available after the last
+allowed action. No additional modifying action is permitted. With model-only
+verification, one final completion decision is permitted and still consumes the
+configured model budget. File-verifier identity binds even without freshness rules.
+
+Execution commands (`run`, `resume`, `demo`) use exit codes 0 completed, 3 paused,
+4 blocked, 5 failed. Invalid CLI/configuration uses 2. `verify` uses 0/1 for
+pass/fail; `doctor` uses 0/1 for healthy/unhealthy. Ctrl+C exits with 130 after persisting interruption state. `status`, `retry` and `reconcile`
+report their operation's result without treating a paused checkpoint as a CLI error.
+
+`last_error` records a stable code, phase, possible action dispatch and recovery
+instruction. Raw exceptions/provider messages are not checkpointed. Recent actions
+retain up to eight known tool names and outcomes, without raw arguments or UI trees.
+Three identical actions on an unchanged observed view pause with `no_progress`.
+
+```bash
+# After correcting a known-outcome failure, explicitly reopen the goal.
+praxis retry goal.json --note "Provider connectivity restored"
+praxis resume goal.json --nova /absolute/path/to/nova
+
+# Extend an exhausted action budget without resetting the action counter.
+praxis retry goal.json --max-steps 60 --note "Authorized remaining work"
+```
+
+`retry` refuses in-flight uncertain actions, pending approvals and denied goals.
+Use `reconcile` only after independently checking an uncertain action's outcome.
+
+## Tool discovery and observation feedback
+
+The model receives a paged tool directory (24 entries per page) and at most six
+selected complete schemas. It may choose `{"type":"discover","query":"download",
+"offset":0,"tools":["actual_advertised_tool"]}` to load any advertised tool,
+including tools after position 12. Discovery is internal and never dispatches a
+backend action. Four consecutive discovery requests are allowed before pausing.
+Schemas too large for the context limit are explicitly marked unavailable. The
+planner must pause for assistance rather than invent parameters. Context shrinking
+operates on whole fields before JSON serialization and preserves goal/criteria.
+
+Nova automatically refreshes observations only using advertised observation tools
+with `readOnlyHint=true` and no required arguments. Backends without such a tool
+retain the explicit model-driven observation path. Screenshot/tool content remains
+transient. Nova tool-list pagination is supported. Browser observations use the
+current accessibility tree, and recent tool outcomes return to the planner.
+
+## Curated experience explanations
+
+```bash
+praxis-experience --store experiences.json add goal.json --verifier rules.json \
+  --environment win11-app-v1 --note "Output independently inspected" \
+  --precondition "Instrumented project is loaded" \
+  --key-step "Build before running SIL cases" \
+  --failure-mode "Wait for test completion before downloading"
+```
+
+Each repeated note option accepts at most eight entries of 200 characters. Store
+records include the checkpoint ID, verifier identity, check time, count and available
+artifact hashes. These references explain provenance; they do not authorize replay.
+Preconditions are hints, not automatically established truths. Existing version-1
+stores remain readable. Writers acquire a process lock, preventing lost updates
+between concurrent local writers; this does not provide distributed locking.
+
+For readiness checks, complete examples, CI artifacts and separately labelled
+real-provider acceptance, see [the acceptance guide](docs/ACCEPTANCE.md).
+
+
+## Dispatch contracts and process interruption
+
+Tool actions are validated against the complete advertised JSON Schema before
+approval evaluation, tracing and write-ahead dispatch. Unknown or duplicate tool
+names, missing/extra arguments, invalid types/enums and unsupported/unresolvable
+schemas never reach the backend. Schema references resolve locally only; remote
+`$ref` resources are not fetched. `jsonschema` is now a runtime dependency.
+Format annotations without assertion semantics are not an additional authorization
+or sandbox boundary. Custom dictionary adapters that omit a `tools` directory
+retain the legacy contract and have no advertised schema to check.
+
+Rejected actions produce a payload-free validation error. The planner can correct
+the action without spending an action step. Three consecutive invalid decisions
+block for operator diagnosis. Operator policy equality preserves JSON types:
+`true` does not match `1`, and the policy copies supplied rules on construction.
+
+The CLI uses `run_session()` to hold the checkpoint lock and validate backend,
+policy, verifier and approval bindings **before** launching Nova or opening a
+browser. Terminal, pending-approval and uncertain-action checkpoints do not start
+a new session merely to return their status. Startup errors are recorded as
+known-outcome session errors. Library callers with an already-open adapter can
+continue using `run()`.
+
+Ctrl+C before dispatch pauses the goal. During a dispatched call it immediately
+records `blocked` plus the uncertain pending action. No interrupted action is
+replayed automatically. Hard termination may leave `running` on disk; `reconcile`
+accepts that state when there is a pending action and it can acquire the lock.
+It refuses reconciliation while another cooperating executor holds the lock.
+
+## Durable publication and transient evidence
+
+Checkpoint creation publishes a temporary file without replacing an existing
+path, including a file created concurrently after the initial existence check.
+Checkpoint and experience writes reject NaN/Infinity, flush and fsync the file,
+and atomically publish it. On POSIX, parent directory entries are fsynced as well;
+Windows uses atomic publication and file fsync without a directory-fsync claim.
+Actual power-loss guarantees still depend on the filesystem and operating system.
+
+Nova manual observation results are now part of the next normalized observation,
+so their content contributes to approval/no-progress view identities. An empty
+result after another action clears the previous screenshot. Automatic fresh
+observations keep bounded previous-action text separately; old result images do
+not replace a fresh screenshot. These payloads remain transient. EOF wakes a
+pending MCP request immediately, and cleanup is safe after a child exits.
+
+Browser resume still creates an isolated context: it does not restore cookies,
+form fields or a previously open tab. The checkpoint records execution progress,
+not a full browser-session snapshot. Reobserve and verify the application state
+on resume; nontrivial stateful browser recovery and native Nova acceptance need
+separate real-backend validation.

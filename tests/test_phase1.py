@@ -64,3 +64,23 @@ class Phase1Tests(unittest.TestCase):
             other = Path(folder) / "other.json"
             create(other, "Verify report", ["report"])
             self.assertNotEqual(run(other, Desktop(), Planner(), verifier=denied)["status"], "completed")
+
+    def test_registered_backend_and_verifier_work_at_final_action_budget(self):
+        calls = []
+        tools = ToolRegistry()
+        tools.register(ToolSpec("read", lambda args: calls.append(args["path"]) or {"ok": True},
+                                {"path": str}, impact="low"))
+        backend = RegisteredToolsBackend(tools, lambda: {"summary": "fixture"})
+        checks = VerificationRegistry()
+        checks.register("observed", lambda params: {"passed": calls == ["report.json"], "evidence": {"calls": len(calls)}})
+        verifier = CriteriaVerifier(checks, {"report": {"verifier": "observed"}})
+        class Planner:
+            def decide(self, state, observation):
+                return {"type": "act", "action": {"name": "read", "impact": "low", "arguments": {"path": "report.json"}}}
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/"state.json"
+            create(path, "Inspect fixture", ["report"], max_steps=1)
+            result = run(path, backend, Planner(), verifier=verifier)
+            self.assertEqual((result["status"], result["steps"]), ("completed", 1))
+            self.assertEqual(result["verification"]["source"], "criteria_registry")
+            self.assertTrue(result["artifact_verification"]["passed"])

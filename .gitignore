@@ -1,1 +1,9 @@
-__pycache__/\n*.py[cod]\n.venv/\n*.egg-info/\nbuild/\ndist/\n.pytest_cache/\n*.json.lock\n
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+*.json.lock
+demo-run/

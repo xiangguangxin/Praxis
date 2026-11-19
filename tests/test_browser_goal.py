@@ -112,6 +112,18 @@ class BrowserGoals(unittest.TestCase):
             self.assertEqual(self.command("cli", "compare-traces", checkpoint, checkpoint),
                              {"status": "match", "actions_compared": 4})
 
+    def test_reproducible_demo_produces_a_verified_report_and_screenshot(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "demo"
+            options = ["--browser-executable", self.executable] if self.executable else []
+            report = self.command("cli", "demo", "--output", root, *options)
+            self.assertEqual(report["status"], "completed")
+            self.assertEqual(report["verification_level"], "independent_artifact")
+            self.assertFalse(report["real_model"])
+            self.assertTrue(report["checks"]["passed"])
+            self.assertGreater((root / "final.png").stat().st_size, 100)
+            self.assertTrue((root / "index.html").is_file())
+
     def test_live_benchmark_browser_experience_pair(self):
         with tempfile.TemporaryDirectory() as temp:
             memory = Path(temp) / "memory.json"

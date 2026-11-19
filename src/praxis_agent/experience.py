@@ -6,8 +6,11 @@ import os
 import re
 import tempfile
 import time
+from functools import wraps
+from .locking import checkpoint_lock
 from pathlib import Path
 from .state import load
+from .storage import atomic_json_write
 
 DAY = 86400
 DEFAULT_TTL_DAYS = 90
@@ -17,6 +20,22 @@ MIN_SCORE = 0.20
 def _terms(text):
     # Unicode words + individual CJK characters: deterministic, no embedding API.
     return set(re.findall(r"[a-z0-9_]+|[\u3400-\u9fff]", text.casefold()))
+
+def _writer(method):
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with checkpoint_lock(self.path):
+            return method(self, *args, **kwargs)
+    return locked
+
+
+def _notes(values, name):
+    if values is None:
+        return []
+    if not isinstance(values, (list, tuple)) or len(values) > 8 or any(
+            not isinstance(v, str) or not v.strip() or len(v) > 200 for v in values):
+        raise ValueError(f"{name}: at most eight nonempty notes of 200 characters")
+    return list(values)
 
 class ExperienceStore:
     def __init__(self, path: Path):
@@ -31,18 +50,7 @@ class ExperienceStore:
         return data
 
     def _write(self, data):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, name = tempfile.mkstemp(prefix=".experience-", dir=self.path.parent)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                json.dump(data, stream, ensure_ascii=False, indent=2)
-                stream.write("\n")
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(name, self.path)
-        finally:
-            if os.path.exists(name):
-                os.unlink(name)
+        atomic_json_write(self.path, data)
 
     @staticmethod
     def _effective(item, now):
@@ -54,7 +62,7 @@ class ExperienceStore:
         age = max(0, now - created)
         ttl = item.get("ttl_days", DEFAULT_TTL_DAYS)
         half = item.get("half_life_days", DEFAULT_HALF_LIFE_DAYS)
-        if type(ttl) not in (float, int) or type(half) not in (float, int) or ttl <= 0 or half <= 0:
+        if type(ttl) not in (float, int) or type(half) not in (float, int) or not math.isfinite(ttl) or not math.isfinite(half) or ttl <= 0 or half <= 0:
             return 0.0
         if age >= ttl * DAY:
             return 0.0
@@ -65,15 +73,19 @@ class ExperienceStore:
         reliability = (successes + 1) / (successes + failures + 1)
         return 2 ** (-age / (half * DAY)) * reliability
 
-    def add_verified(self, checkpoint: Path, *, verifier, environment: str, note: str) -> dict:
+    @_writer
+    def add_verified(self, checkpoint: Path, *, verifier, environment: str, note: str,
+                     preconditions=None, key_steps=None, failure_modes=None) -> dict:
         state = load(checkpoint)
         if state["status"] != "completed":
             raise ValueError("Only completed tasks can become experiences")
         if not environment.strip() or not note.strip():
             raise ValueError("Environment and operator note required")
         from .verification import FileVerifier
-        passed = (verifier.evaluate(state)["passed"] if isinstance(verifier, FileVerifier)
-                  else verifier.verify(state["criteria"], {}, {}))
+        if not isinstance(verifier, FileVerifier):
+            raise ValueError("Experience curation requires independent file verification")
+        evaluation = verifier.evaluate(state)
+        passed = evaluation["passed"]
         if not passed:
             raise ValueError("Independent verifier did not pass")
         item = {
@@ -83,6 +95,13 @@ class ExperienceStore:
             "recorded_at": time.time(), "source": "independently-verified",
             "status": "active", "successes": 0, "failures": 0,
             "ttl_days": DEFAULT_TTL_DAYS, "half_life_days": DEFAULT_HALF_LIFE_DAYS,
+            "preconditions": _notes(preconditions, "preconditions"),
+            "key_steps": _notes(key_steps, "key_steps"),
+            "failure_modes": _notes(failure_modes, "failure_modes"),
+            "evidence": {"checkpoint_id": state["id"], "verifier_id": verifier.identity,
+                         "checked_at": time.time(), "passed_checks": len(evaluation["checks"]),
+                         "artifact_hashes": [check["sha256"] for check in evaluation["checks"].values()
+                                             if "sha256" in check][:20]},
         }
         data = self._read()
         if any(existing["id"] == item["id"] for existing in data["experiences"]):
@@ -108,6 +127,7 @@ class ExperienceStore:
         matches.sort(key=lambda pair: (-pair[0], pair[1]["id"]))
         return [dict(item, effective_score=round(score, 4)) for score, item in matches[:limit]]
 
+    @_writer
     def feedback(self, experience_id: str, *, outcome: str, note: str = "") -> dict:
         """Explicit verified feedback only; do not infer failure from planner errors."""
         if outcome not in ("success", "failure") or not note.strip():
@@ -128,6 +148,7 @@ class ExperienceStore:
                 return item
         raise KeyError(experience_id)
 
+    @_writer
     def invalidate(self, experience_id: str, *, reason: str) -> dict:
         if not reason.strip():
             raise ValueError("Reason required")
@@ -140,6 +161,7 @@ class ExperienceStore:
                 return item
         raise KeyError(experience_id)
 
+    @_writer
     def expire(self, *, now=None) -> int:
         """Persist time-expired records as invalidated; no silent deletion."""
         now = time.time() if now is None else now

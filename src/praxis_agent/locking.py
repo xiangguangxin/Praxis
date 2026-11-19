@@ -11,12 +11,13 @@ def checkpoint_lock(checkpoint: Path):
     with open(path, "a+b") as handle:
         if os.name == "nt":
             import msvcrt
-            handle.seek(0)
-            if handle.read(1) == b"":
-                handle.write(b"0")
-                handle.flush()
-            handle.seek(0)
             try:
+                # Reading a byte locked by another Windows handle raises before
+                # msvcrt.locking. Inspect file size without touching locked data.
+                if os.fstat(handle.fileno()).st_size == 0:
+                    handle.write(b"0")
+                    handle.flush()
+                handle.seek(0)
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
             except OSError as exc:
                 raise RuntimeError("Checkpoint is already locked") from exc
