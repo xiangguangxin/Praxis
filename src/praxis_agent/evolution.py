@@ -7,7 +7,6 @@ untrusted advice rather than an executable action.
 from __future__ import annotations
 import hashlib
 import json
-import math
 import time
 import uuid
 from pathlib import Path
@@ -109,6 +108,16 @@ class EvolutionStore:
             self._write(data)
         return item
 
+    def evaluate_variants(self, strategy_id: str, report, *, baseline_variant="baseline",
+                          candidate_variant="strategy_candidate") -> dict:
+        report = self._report(report)
+        def selected(name):
+            subset = [row for row in report["records"] if row.get("variant") == name]
+            if not subset:
+                raise EvolutionError("Benchmark report is missing variant: " + name)
+            return {**report, "records": subset}
+        return self.evaluate(strategy_id, selected(baseline_variant), selected(candidate_variant))
+
     def evaluate(self, strategy_id: str, baseline_report, candidate_report) -> dict:
         baseline, candidate = self._report(baseline_report), self._report(candidate_report)
         if self._signature(baseline) != self._signature(candidate):
@@ -186,7 +195,8 @@ class EvolutionStore:
             self._write(data)
             return item
 
-    def search(self, query: str, *, environment: str, limit: int = 2) -> list[dict]:
+    def search(self, query: str, *, environment: str, limit: int = 2,
+               include_candidate_id: str | None = None) -> list[dict]:
         if not isinstance(query, str) or not query.strip() or not isinstance(environment, str) or not environment.strip():
             return []
         if type(limit) is not int or not 1 <= limit <= 5:
@@ -194,7 +204,10 @@ class EvolutionStore:
         terms = _terms(query)
         matches = []
         for item in self._read()["strategies"]:
-            if item.get("status") != "promoted" or item.get("environment") != environment:
+            eligible = item.get("status") == "promoted" or (
+                include_candidate_id is not None and item.get("id") == include_candidate_id
+                and item.get("status") == "candidate")
+            if not eligible or item.get("environment") != environment:
                 continue
             overlap = len(terms & _terms(item.get("goal", "")))
             if overlap:
