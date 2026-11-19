@@ -53,6 +53,10 @@ def main():
     worker.add_argument("--database", type=Path, required=True)
     worker.add_argument("--checkpoint-dir", type=Path, required=True)
     worker.add_argument("--max-jobs", type=int, default=1)
+    worker.add_argument("--lease-seconds", type=float, default=60,
+                        help="Worker job lease duration; renewed while the job runs")
+    worker.add_argument("--heartbeat-interval", type=float,
+                        help="Heartbeat cadence (default: one third of the lease)")
     backend = worker.add_mutually_exclusive_group(required=True)
     backend.add_argument("--nova")
     backend.add_argument("--browser-url")
@@ -192,4 +196,5 @@ def _run_worker(args):
         values = vars(args).copy()
         values.update({"command": "run", "checkpoint": checkpoint, "approve_pending": False, "approval_id": None})
         return _execute(Namespace(**values))
-    return {"jobs": Worker(scheduler, execute).run(max_jobs=args.max_jobs)}
+    return {"jobs": Worker(scheduler, execute, lease_seconds=args.lease_seconds,
+                           heartbeat_interval=args.heartbeat_interval).run(max_jobs=args.max_jobs)}

@@ -210,4 +210,4 @@ praxis schedule --database ./praxis-jobs.sqlite --goal "Inspect the report" --cr
 praxis worker --database ./praxis-jobs.sqlite --checkpoint-dir ./job-checkpoints --max-jobs 1 --nova /path/to/nova --model-profiles ./models.json
 ```
 
-The worker exits after at most `--max-jobs`, stores a checkpoint per job, and marks only an agent result with status `completed` as a completed job. Paused or blocked goals become failed queue entries for operator follow-up; they are not silently retried. This is a foreground local worker, not a daemon or distributed scheduler.
+The worker exits after at most `--max-jobs`, stores a checkpoint per job, and marks only an agent result with status `completed` as a completed job. Each claimed job has a renewable lease and fencing token; a heartbeat thread renews long-running work, expired leases are recovered after process crashes, and stale workers cannot publish a result after a new worker reclaims the job. Paused or blocked goals become failed queue entries for operator follow-up; explicit retry resets the attempt budget. This is a foreground local worker backed by SQLite, not a remote distributed scheduler.

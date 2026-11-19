@@ -387,7 +387,16 @@ praxis schedule --database ./jobs.sqlite --goal "Inspect report" --criterion "Re
 praxis worker --database ./jobs.sqlite --checkpoint-dir ./checkpoints --max-jobs 1 --nova /path/to/nova
 ```
 
-The worker claims due jobs atomically and runs at most the configured count before exiting. It does not run in the background. It records each job's goal checkpoint; only a completed goal becomes a completed queue job. Paused, blocked, and failed goals are marked failed for explicit operator follow-up, not automatically retried. Worker execution requires the same model credentials and optional verifier configuration as a direct run.
+The worker claims due jobs atomically and runs at most the configured count before exiting. Each claim receives an owner and an unguessable lease token. A heartbeat thread renews the lease while the injected executor is active; completion/failure is accepted only from the current unexpired owner/token pair. A stale worker cannot overwrite the result after another worker reclaims the job. Expired jobs are requeued while attempts remain and become failed after the configured limit. Explicit `praxis retry` resets the attempt budget. Worker execution requires the same model credentials and optional verifier configuration as a direct run.
+
+Configure the lease when starting the worker:
+
+```sh
+praxis worker --database ./jobs.sqlite --checkpoint-dir ./checkpoints \\
+  --max-jobs 2 --lease-seconds 90 --heartbeat-interval 20 --nova /path/to/nova
+```
+
+The SQLite queue supports multiple cooperating local processes sharing the same database file. It is not a distributed queue across hosts or a substitute for the goal checkpoint's action reconciliation. If a worker dies during an uncertain GUI action, the recovered job resumes from its checkpoint; Praxis still blocks and requires explicit reconciliation rather than replaying that action.
 
 
 ## Phase 5: autonomous DAG orchestration
@@ -456,3 +465,16 @@ The standard `praxis run` / `praxis resume` loop now supports verified task exec
 The task lifecycle is checkpointed in the same Goal file, so a paused run resumes the active task instead of starting the DAG over. A run with no independent verifier, or a legacy plan that does not map its acceptance entries to the Goal criteria, remains advisory rather than claiming verified orchestration. Model-generated plans never bypass action schema validation, operator policy, approval gates, write-ahead action records, or uncertain-action reconciliation.
 
 Task acceptance entries currently reuse the Goal's configured criterion names; separate task-specific verifier-rule files and automatic model-assisted replanning of a failed DAG remain future work.
+
+
+## Worker leases and crash recovery (Phase 5.3)
+
+The SQLite scheduler migrates older job databases in place by adding lease metadata. The lifecycle is:
+
+- `queued → running`: atomic claim under `BEGIN IMMEDIATE`, incrementing attempts and issuing a fresh lease token.
+- `running → running`: owner/token-bound heartbeat extends `lease_expires_at`.
+- `running → completed/failed`: only the current, unexpired lease owner/token may publish the terminal result.
+- Expired `running` jobs return to `queued` while attempts remain; otherwise they become `failed`.
+- Explicit retry of a failed job clears prior results and resets its attempt budget.
+
+The worker renews leases on a daemon heartbeat thread while the injected job executor runs. Lease loss prevents that worker from publishing a result. The underlying GUI goal checkpoint lock and write-ahead action recovery remain the authority for safe resume; queue lease recovery never implies that an uncertain GUI action is safe to replay.
