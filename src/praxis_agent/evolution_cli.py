@@ -23,6 +23,8 @@ def main():
     evaluate.add_argument("--candidate-variant",default="strategy_candidate")
     promote=commands.add_parser("promote")
     promote.add_argument("strategy_id")
+    promote.add_argument("--experience-store",type=Path,required=True,
+        help="Recheck that the source verified experience remains active")
     rollback=commands.add_parser("rollback")
     rollback.add_argument("strategy_id")
     rollback.add_argument("--reason",required=True)
@@ -30,7 +32,7 @@ def main():
     listing.add_argument("--status",choices=("candidate","promoted","rolled_back"))
     args=parser.parse_args()
     store=EvolutionStore(args.store,
-        ExperienceStore(args.experience_store) if args.command=="propose" else None)
+        ExperienceStore(args.experience_store) if args.command in ("propose","promote") else None)
     if args.command=="propose":
         result=store.propose(goal=args.goal,environment=args.environment,instruction=args.instruction,
             source_experience_id=args.source_experience_id,rationale=args.rationale)

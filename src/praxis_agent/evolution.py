@@ -70,17 +70,25 @@ class EvolutionStore:
         def index(report):
             result = {}
             for row in report["records"]:
-                if not isinstance(row, dict) or not isinstance(row.get("scenario"), str):
+                if (not isinstance(row, dict) or not isinstance(row.get("scenario"), str)
+                        or type(row.get("iteration")) is not int or row["iteration"] < 1
+                        or type(row.get("passed")) is not bool
+                        or type(row.get("completed_and_verified")) is not bool):
                     raise EvolutionError("Malformed benchmark record")
-                key = (row["scenario"], row.get("iteration"))
-                if key in result or type(row.get("passed")) is not bool:
-                    raise EvolutionError("Duplicate or invalid benchmark record")
+                if "trajectory" in row and (not isinstance(row["trajectory"], dict)
+                        or type(row["trajectory"].get("passed")) is not bool):
+                    raise EvolutionError("Malformed trajectory result")
+                key = (row["scenario"], row["iteration"])
+                if key in result:
+                    raise EvolutionError("Duplicate benchmark record")
                 result[key] = row
             return result
         left, right = index(baseline), index(candidate)
         if set(left) != set(right):
             raise EvolutionError("Baseline and candidate must contain identical scenario/iteration pairs")
         pairs = [(left[key], right[key]) for key in sorted(left)]
+        if any(("trajectory" in a) != ("trajectory" in b) for a, b in pairs):
+            raise EvolutionError("Baseline and candidate trajectory evidence must be comparable")
         return pairs
 
     def propose(self, *, goal: str, environment: str, instruction: str,
@@ -178,6 +186,13 @@ class EvolutionStore:
             item = self._find(data, strategy_id)
             if item["status"] != "candidate" or not item.get("evaluation", {}).get("passed"):
                 raise EvolutionError("Promotion requires a passing paired benchmark evaluation")
+            if self.experience_store is None:
+                raise EvolutionError("Promotion requires rechecking the source ExperienceStore")
+            source = next((entry for entry in self.experience_store._read()["experiences"]
+                           if entry.get("id") == item.get("source_experience_id")), None)
+            if (source is None or source.get("source") != "independently-verified"
+                    or source.get("status", "active") != "active"):
+                raise EvolutionError("Source experience is no longer active and verified")
             item["status"], item["promoted_at"] = "promoted", time.time()
             self._write(data)
             return item

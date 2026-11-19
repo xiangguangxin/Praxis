@@ -6,6 +6,8 @@ from praxis_agent.evolution import EvolutionStore, EvolutionError
 from praxis_agent.experience import ExperienceStore
 from praxis_agent.state import create, persist
 from praxis_agent.verification import FileVerifier
+from praxis_agent.planner import ModelPlanner
+from unittest.mock import patch
 
 class EvolutionLifecycleTests(unittest.TestCase):
     def setUp(self):
@@ -51,6 +53,29 @@ class EvolutionLifecycleTests(unittest.TestCase):
         self.assertEqual(promoted["status"],"promoted")
         hints=self.store.search("coverage report",environment="linux-ci")
         self.assertEqual([item["id"] for item in hints],[self.strategy["id"]])
+
+    def test_planner_only_receives_promoted_strategies_unless_candidate_preview_requested(self):
+        report={"provenance":self.report("baseline",5)["provenance"],
+                "records":self.report("baseline",5)["records"]+self.report("strategy_candidate",8)["records"]}
+        self.store.evaluate_variants(self.strategy["id"],report)
+        self.store.promote(self.strategy["id"])
+        captured=[]
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): pass
+            def read(self):
+                return json.dumps({"choices":[{"message":{"content":'{"type":"pause","reason":"inspect"}'}}],
+                                   "usage":{"prompt_tokens":10,"completion_tokens":5}}).encode()
+        def fake(request,timeout):
+            captured.append(json.loads(request.data))
+            return Response()
+        planner=ModelPlanner("model","key","https://invalid",
+            evolution_store=self.store,evolution_environment="linux-ci")
+        state={"goal":"Generate a verified coverage report","criteria":["report"],"steps":0,"max_steps":5}
+        with patch("praxis_agent.planner.urllib.request.urlopen",side_effect=fake):
+            planner.decide(state,{"summary":"ready"})
+        self.assertIn("untrusted_strategy_hints",json.dumps(captured[-1]))
+        self.assertEqual(planner.usage["strategy_hint_calls"],1)
 
     def test_candidate_preview_is_opt_in_and_does_not_promote(self):
         self.assertEqual(self.store.search("coverage report",environment="linux-ci",
