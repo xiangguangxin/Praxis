@@ -1,13 +1,25 @@
 """Durable local SQLite job queue; claims due jobs atomically."""
 import json, sqlite3, time, uuid
+from contextlib import contextmanager
 class Scheduler:
     def __init__(self,database):
         self.database=str(database)
-        with self._connect() as db:
+        with self._session() as db:
             db.execute("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, goal TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL, run_at REAL NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, result TEXT, error TEXT)")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_due ON jobs(status,run_at)")
     def _connect(self):
         db=sqlite3.connect(self.database,timeout=10); db.row_factory=sqlite3.Row; return db
+    @contextmanager
+    def _session(self):
+        db=self._connect()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
     def enqueue(self,goal,payload=None,*,run_at=None):
         if not isinstance(goal,str) or not goal.strip(): raise ValueError("goal required")
         if payload is not None and not isinstance(payload,dict): raise ValueError("payload must be object")
