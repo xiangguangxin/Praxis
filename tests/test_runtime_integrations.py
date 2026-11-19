@@ -13,7 +13,7 @@ class RuntimeIntegrationTests(unittest.TestCase):
         self.assertEqual(router.select(risk="high").name,"vision")
     def test_planner_generates_validated_dag(self):
         planner=ModelPlanner("base","key","https://example.test/v1/chat/completions")
-        planner._request=lambda messages,**kwargs: {"tasks":[{"id":"open","goal":"Open app","dependencies":[]},{"id":"inspect","goal":"Inspect target","dependencies":["open"]}]}
+        planner._request=lambda messages,**kwargs: {"tasks":[{"id":"open","goal":"Open app","dependencies":[],"acceptance":["target inspected"]},{"id":"inspect","goal":"Inspect target","dependencies":["open"],"acceptance":["target inspected"]}]}
         plan=planner.prepare_plan({"goal":"Inspect app","criteria":["target inspected"],"model_usage":{}},{"summary":"desktop"})
         self.assertEqual([t["id"] for t in plan["tasks"]],["open","inspect"])
         self.assertEqual(planner.usage["plan_calls"],1)

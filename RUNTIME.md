@@ -376,7 +376,7 @@ separate real-backend validation.
 
 ## Integrated planning and model routing
 
-When using the standard CLI, ModelPlanner proposes a DAG before its first GUI action. The runtime validates and stores it in the existing goal checkpoint. Failed action outcomes can trigger up to three replanning requests. The DAG is advisory; the normal observe/decide/validate/approve/action loop remains authoritative. Existing checkpoints without a plan acquire one on their next run.
+When using the standard CLI, ModelPlanner proposes a DAG before its first GUI action. If an independent `FileVerifier` or `CriteriaVerifier` is configured and each task maps its acceptance entries to the goal's exact criteria (covering all criteria), the GUI loop enforces tasks in dependency order. The model uses `task_complete` to request completion; the configured verifier, not model text, decides whether the task passes. Failed checks are retried within a bounded per-task budget, and exhausted failures block dependents. Task status and per-task fresh-artifact baselines are stored in the goal checkpoint. Plans without a valid acceptance mapping, or runs without an independent verifier, remain advisory for backward compatibility. Existing checkpoints without a plan acquire one on their next run.
 
 Pass `--model-profiles profiles.json` to enable capability-aware routing. Each profile declares `name`, `model`, `endpoint`, `api_key_env`, `capabilities` and optional `max_cost_tier`. A screenshot request requires a profile with `vision`; a failed action prefers a higher cost tier. API keys are read from the named environment variables, not from the JSON file.
 
@@ -440,3 +440,19 @@ orchestrator.replan_with(
 ```
 
 The DAG orchestrator is a library-level orchestration primitive. It is not yet the default executor inside the GUI `praxis run` loop; that integration requires a task adapter contract and per-node independent verification configuration. Its checkpoint is separate from the top-level Goal checkpoint.
+
+
+### GUI task-DAG execution (Phase 5.2)
+
+The standard `praxis run` / `praxis resume` loop now supports verified task execution without bypassing the existing GUI safety pipeline:
+
+1. The model proposes a DAG whose task acceptance entries are exact strings from the Goal criteria. Every Goal criterion must be covered.
+2. With an independent `--verifier` configuration, Praxis activates one ready task at a time and includes its goal, acceptance criteria, and attempt count in the next model context.
+3. The model performs normal observed GUI actions. It may request `task_complete`, but that request is not proof.
+4. Praxis evaluates only that task's configured verifier rules. File verification captures a separate fresh-artifact baseline at task start. Only a passing independent check unlocks dependent tasks.
+5. Failed checks trigger a bounded task retry. Exhausted failures block dependent tasks while independent branches remain eligible.
+6. Once all tasks pass, the ordinary Goal-level verifier runs again before the Goal is marked completed.
+
+The task lifecycle is checkpointed in the same Goal file, so a paused run resumes the active task instead of starting the DAG over. A run with no independent verifier, or a legacy plan that does not map its acceptance entries to the Goal criteria, remains advisory rather than claiming verified orchestration. Model-generated plans never bypass action schema validation, operator policy, approval gates, write-ahead action records, or uncertain-action reconciliation.
+
+Task acceptance entries currently reuse the Goal's configured criterion names; separate task-specific verifier-rule files and automatic model-assisted replanning of a failed DAG remain future work.
