@@ -16,11 +16,19 @@ def main():
     propose.add_argument("--environment",required=True)
     propose.add_argument("--instruction",required=True)
     propose.add_argument("--rationale",required=True)
+    extract=commands.add_parser("extract")
+    extract.add_argument("--experience-store",type=Path,required=True)
+    extract.add_argument("--experience-id",required=True)
     evaluate=commands.add_parser("evaluate")
     evaluate.add_argument("strategy_id")
     evaluate.add_argument("--report",type=Path,required=True)
     evaluate.add_argument("--baseline-variant",default="baseline")
     evaluate.add_argument("--candidate-variant",default="strategy_candidate")
+    reassess=commands.add_parser("reassess")
+    reassess.add_argument("strategy_id")
+    reassess.add_argument("--report",type=Path,required=True)
+    reassess.add_argument("--baseline-variant",default="baseline")
+    reassess.add_argument("--candidate-variant",default="strategy_candidate")
     promote=commands.add_parser("promote")
     promote.add_argument("strategy_id")
     promote.add_argument("--experience-store",type=Path,required=True,
@@ -32,11 +40,13 @@ def main():
     listing.add_argument("--status",choices=("candidate","promoted","rolled_back"))
     args=parser.parse_args()
     store=EvolutionStore(args.store,
-        ExperienceStore(args.experience_store) if args.command in ("propose","promote") else None)
+        ExperienceStore(args.experience_store) if args.command in ("propose","promote","extract") else None)
     if args.command=="propose":
         result=store.propose(goal=args.goal,environment=args.environment,instruction=args.instruction,
             source_experience_id=args.source_experience_id,rationale=args.rationale)
-    elif args.command=="evaluate":
+    elif args.command=="extract":
+        result=store.extract_candidate(args.experience_id)
+    elif args.command in ("evaluate","reassess"):
         result=store.evaluate_variants(args.strategy_id,args.report,
             baseline_variant=args.baseline_variant,candidate_variant=args.candidate_variant)
     elif args.command=="promote":
