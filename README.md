@@ -25,7 +25,7 @@ Praxis is a **goal-driven agent execution runtime** extracted from [OpenAS](http
 | **Plan** | Multimodal planner plus validated, mutable DAG orchestration with per-node acceptance checks |
 | **Act** | Tool adapters for authorized Nova MCP desktops or Playwright browser sessions |
 | **Verify** | Optional independent allowlisted file checks, provenance, freshness, and tool trajectory rules |
-| **Learn** | Curated verified experiences plus benchmark-gated, versioned strategy promotion and rollback |
+| **Learn** | Curated verified experiences plus benchmark-gated, versioned strategy promotion and rollback; task-aware model routing |
 | **Recover** | Durable checkpoint, process lock, manual reconciliation after uncertain actions |
 
 ## Quick start

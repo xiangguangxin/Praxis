@@ -1,0 +1,32 @@
+{
+  "default": "general",
+  "profiles": [
+    {
+      "name": "general",
+      "model": "your-economy-model",
+      "endpoint": "https://api.example.com/v1/chat/completions",
+      "api_key_env": "PRAXIS_GENERAL_API_KEY",
+      "capabilities": ["chat", "json"],
+      "max_cost_tier": 1,
+      "task_types": ["planning", "execution", "general"]
+    },
+    {
+      "name": "code",
+      "model": "your-code-model",
+      "endpoint": "https://api.example.com/v1/chat/completions",
+      "api_key_env": "PRAXIS_CODE_API_KEY",
+      "capabilities": ["chat", "json"],
+      "max_cost_tier": 2,
+      "task_types": ["code", "debugging"]
+    },
+    {
+      "name": "vision",
+      "model": "your-vision-model",
+      "endpoint": "https://api.example.com/v1/chat/completions",
+      "api_key_env": "PRAXIS_VISION_API_KEY",
+      "capabilities": ["chat", "vision", "json"],
+      "max_cost_tier": 3,
+      "task_types": ["visual_inspection", "verification"]
+    }
+  ]
+}

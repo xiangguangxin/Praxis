@@ -564,3 +564,17 @@ Important boundaries:
 - The model proposes a new DAG, but local graph validation and independent per-task verification decide whether it is accepted.
 - Completed tasks are immutable during repair. Every replacement task must use exact Goal criterion strings, and the new DAG must cover all Goal criteria.
 - Action failures are diagnosed and exposed to the next planning decision; the runtime does not assume that a model-generated explanation is the cause.
+
+
+### Phase 6.3: Task-aware model routing
+
+Model profiles may now declare optional `task_types` specializations. The planner classifies the active task using deterministic goal text signals (debugging, visual inspection, code/build, verification, research, execution or planning) and routes the request to a compatible specialized profile. Capability requirements (chat/vision), risk preference and cost tier remain enforced. If no specialized profile matches, the router falls back to a generic profile; older profile files without `task_types` remain valid.
+
+Example configuration: [examples/model-profiles-task-aware.json](examples/model-profiles-task-aware.json).
+
+```sh
+praxis run ./goal-state.json --browser-url http://127.0.0.1:8080/ \
+  --model-profiles ./examples/model-profiles-task-aware.json
+```
+
+Set each profile's API key environment variable before running. The example model names and endpoint are placeholders. Route counts are recorded in model usage so benchmark runs can show which task types used each route. Task classification is a routing hint, not an authorization decision; every route still obeys capability, budget and action-policy checks.

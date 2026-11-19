@@ -95,6 +95,8 @@ def _record(case, index, variant, state, verifier, actions, elapsed):
         "usage_missing_calls": usage.get("usage_missing_calls", 0),
         "experience_hint_calls": usage.get("experience_hint_calls", 0),
         "strategy_hint_calls": usage.get("strategy_hint_calls", 0),
+        "routes": {key: value for key, value in usage.items()
+                   if key.startswith("route_") and type(value) is int},
         "estimated_input_tokens": usage.get("estimated_input_tokens", 0),
         "elapsed_seconds": round(elapsed, 4),
         **trajectory,
@@ -106,7 +108,12 @@ def _metrics(records, synthetic):
     usage_complete = all(item["usage_missing_calls"] == 0
                          and (synthetic or item["model_calls"] > 0) for item in records)
     trajectories = [item["trajectory"]["passed"] for item in records if "trajectory" in item]
+    route_counts = {}
+    for item in records:
+        for route, count in item.get("routes", {}).items():
+            route_counts[route] = route_counts.get(route, 0) + count
     return {
+        "route_counts": route_counts,
         "trajectory_pass_rate": statistics.mean(trajectories) if trajectories else None,
         "runs": len(records), "success_rate": statistics.mean(item["passed"] for item in records),
         "completion_rate": statistics.mean(item["completed_and_verified"] for item in positive) if positive else None,

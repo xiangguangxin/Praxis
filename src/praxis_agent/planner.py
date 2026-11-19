@@ -123,17 +123,36 @@ class ModelPlanner:
                     "plan_calls":0,"route_switches":0}
         self._last_route=None
 
-    def _route(self, vision, risk):
+    @staticmethod
+    def _infer_task_type(state):
+        active = state.get("active_task") if isinstance(state.get("active_task"), dict) else {}
+        text = str(active.get("goal") or state.get("goal", "")).casefold()
+        if any(word in text for word in ("debug", "bug", "traceback", "error", "failure")):
+            return "debugging"
+        if any(word in text for word in ("screenshot", "visual", "layout", "inspect", "ui review")):
+            return "visual_inspection"
+        if any(word in text for word in ("implement", "code", "script", "compile", "refactor", "build")):
+            return "code"
+        if any(word in text for word in ("verify", "verification", "coverage", "test", "validate", "check", "report")):
+            return "verification"
+        if any(word in text for word in ("research", "search", "documentation", "lookup")):
+            return "research"
+        return "execution" if active else "planning"
+
+    def _route(self, vision, risk, task_type="general"):
         if self.model_router is None: return self.model,self.api_key,self.endpoint,"default"
-        profile=self.model_router.select(requires_vision=vision,risk=risk)
+        profile=self.model_router.select(task_type=task_type,requires_vision=vision,risk=risk)
         key=os.getenv(profile.api_key_env)
         if not key: raise ValueError("Missing API key environment variable: "+profile.api_key_env)
         if self._last_route is not None and self._last_route!=profile.name: self.usage["route_switches"]+=1
         self._last_route=profile.name
         return profile.model,key,profile.endpoint,profile.name
 
-    def _request(self,messages,*,vision=False,risk="low",max_tokens=None):
-        model,key,endpoint,_=self._route(vision,risk)
+    def _request(self,messages,*,vision=False,risk="low",max_tokens=None,task_type="general"):
+        model,key,endpoint,route=self._route(vision,risk,task_type)
+        for label in ("task_" + task_type, "profile_" + route):
+            key = "route_" + label + "_calls"
+            self.usage[key] = self.usage.get(key, 0) + 1
         payload={"model":model,"messages":messages,"temperature":0,"response_format":{"type":"json_object"}}
         if max_tokens: payload["max_tokens"]=max_tokens
         request=urllib.request.Request(endpoint,data=json.dumps(payload).encode(),
@@ -169,7 +188,7 @@ class ModelPlanner:
         messages=[{"role":"system","content":"You decompose user goals into verifiable execution plans. Return JSON only."},
                   {"role":"user","content":json.dumps({**prompt,"observation":_compact_observation(observation)},ensure_ascii=False)[:12000]}]
         budget=self._check_budget(state,messages)
-        proposal=self._request(messages,vision=any(isinstance(x,dict) and x.get("type")=="image" for x in observation.get("content",[])),max_tokens=budget)
+        proposal=self._request(messages,vision=any(isinstance(x,dict) and x.get("type")=="image" for x in observation.get("content",[])),max_tokens=budget,task_type="planning")
         graph=DynamicTaskPlanner(lambda _:proposal,max_tasks=12).plan(state["goal"],state["criteria"])
         self.usage["plan_calls"]+=1
         return graph.to_dict()
@@ -195,7 +214,7 @@ class ModelPlanner:
             ]
             budget = self._check_budget(state, messages)
             return self._request(messages, vision=any(isinstance(x,dict) and x.get("type")=="image"
-                for x in observation.get("content",[])), max_tokens=budget)
+                for x in observation.get("content",[])), max_tokens=budget, task_type="planning")
         dynamic = DynamicTaskPlanner(propose, max_tasks=12)
         dynamic.replan_remaining(state["goal"], state["criteria"], graph,
             context={"failure_analysis":state.get("failure_analysis"),
@@ -239,4 +258,5 @@ class ModelPlanner:
         if self.max_tokens and remaining<=estimated: raise TokenBudgetExceeded("Insufficient budget for next request")
         return self._request(messages,vision=any(x.get("type")=="image_url" for x in evidence),
                              risk="high" if (state.get("last_result") or {}).get("ok") is False else "low",
-                             max_tokens=max(1,remaining-estimated) if remaining else None)
+                             max_tokens=max(1,remaining-estimated) if remaining else None,
+                             task_type=self._infer_task_type(state))

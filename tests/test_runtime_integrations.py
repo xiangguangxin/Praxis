@@ -11,6 +11,26 @@ class RuntimeIntegrationTests(unittest.TestCase):
         self.assertEqual(router.select().name,"cheap")
         self.assertEqual(router.select(requires_vision=True).name,"vision")
         self.assertEqual(router.select(risk="high").name,"vision")
+    def test_router_prefers_task_specialized_profiles(self):
+        profiles=[
+            ModelProfile("general","small","https://example.test/v1/chat/completions","GENERAL_KEY",frozenset({"chat"}),1),
+            ModelProfile("code","coder","https://example.test/v1/chat/completions","CODE_KEY",frozenset({"chat"}),2,frozenset({"code","debugging"})),
+            ModelProfile("vision","visual","https://example.test/v1/chat/completions","VISION_KEY",frozenset({"chat","vision"}),3,frozenset({"visual_inspection"})),
+        ]
+        router=ModelRouter(profiles,"general")
+        self.assertEqual(router.select(task_type="code").name,"code")
+        self.assertEqual(router.select(task_type="debugging").name,"code")
+        self.assertEqual(router.select(task_type="visual_inspection",requires_vision=True).name,"vision")
+        self.assertEqual(router.select(task_type="verification").name,"general")
+        self.assertEqual(router.select(task_type="code",risk="high").name,"code")
+
+    def test_planner_infers_specialized_task_roles(self):
+        self.assertEqual(ModelPlanner._infer_task_type({"goal":"Do work"}),"planning")
+        self.assertEqual(ModelPlanner._infer_task_type({"goal":"Build report","active_task":{"goal":"Fix traceback"}}),"debugging")
+        self.assertEqual(ModelPlanner._infer_task_type({"goal":"Build report","active_task":{"goal":"Inspect screenshot"}}),"visual_inspection")
+        self.assertEqual(ModelPlanner._infer_task_type({"goal":"Build report","active_task":{"goal":"Build the coverage tool"}}),"code")
+        self.assertEqual(ModelPlanner._infer_task_type({"goal":"Build report","active_task":{"goal":"Verify output"}}),"verification")
+
     def test_planner_generates_validated_dag(self):
         planner=ModelPlanner("base","key","https://example.test/v1/chat/completions")
         planner._request=lambda messages,**kwargs: {"tasks":[{"id":"open","goal":"Open app","dependencies":[],"acceptance":["target inspected"]},{"id":"inspect","goal":"Inspect target","dependencies":["open"],"acceptance":["target inspected"]}]}
