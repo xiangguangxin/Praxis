@@ -38,3 +38,15 @@ class TaskOrchestratorTests(unittest.TestCase):
             self.assertEqual(runner.run()["status"],"paused")
             resumed=TaskOrchestrator.resume(path,lambda t:calls.append(t.id) or {},lambda t,r:True)
             self.assertEqual(resumed.run()["status"],"completed"); self.assertEqual(calls,["a","b"])
+
+    def test_independent_branch_finishes_after_other_branch_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            calls=[]
+            graph=TaskGraph([Task("bad","Bad"),Task("independent","Independent"),Task("child","Child",("bad",))])
+            runner=TaskOrchestrator(graph,lambda task:calls.append(task.id) or {},
+                lambda task,result: task.id != "bad",Path(d)/"p.json")
+            result=runner.run()
+            self.assertIn("independent",calls)
+            self.assertNotIn("child",calls)
+            self.assertEqual(result["status"],"blocked")
+            self.assertEqual(result["tasks"]["independent"],"completed")

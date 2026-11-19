@@ -122,7 +122,7 @@ class TaskOrchestrator:
         if self.attempts[task_id] < self.max_attempts:
             self.graph.transition(task_id, "pending"); self._event("retry_scheduled", task_id)
         else:
-            self._event("task_failed", task_id); self._block_descendants(task_id); self.status = "blocked"
+            self._event("task_failed", task_id); self._block_descendants(task_id)
     def snapshot(self):
         return {"status": self.status, "tasks": dict(self.graph.status), "attempts": dict(self.attempts),
                 "results": dict(self.results), "checkpoint": str(self.checkpoint)}
