@@ -49,13 +49,14 @@ class Phase5OrchestrationTests(unittest.TestCase):
             self.assertEqual(resumed.graph.status,{"a":"completed","d":"pending"})
             self.assertEqual(resumed.graph.tasks["d"].acceptance,("D artifact exists",))
             self.assertEqual(resumed.events[-1]["event"],"plan_replaced")
-    def test_replan_cannot_drop_verified_work(self):
+    def test_replan_preserves_verified_work_even_when_not_referenced(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/"plan.json"; graph=TaskGraph([Task("done","Done"),Task("todo","Todo",("done",))])
             runner=TaskOrchestrator(graph,lambda t:{},lambda t,r:True,path)
             runner.graph.transition("done","running"); runner.graph.transition("done","completed")
             runner.status="paused"
-            with self.assertRaises(OrchestrationError): runner.replan_remaining([Task("replacement","New")],reason="Scope changed")
+            result=runner.replan_remaining([Task("replacement","New")],reason="Scope changed")
+            self.assertEqual(result["tasks"],{"done":"completed","replacement":"pending"})
     def test_verification_evidence_persisted_per_node(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/"plan.json"; graph=TaskGraph([Task("a","A",(),("file exists",))])
