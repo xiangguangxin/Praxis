@@ -56,7 +56,7 @@ class EvolutionStore:
     def _signature(report):
         provenance = report["provenance"]
         required = ("suite_sha256", "runtime_source_sha256", "runtime_package_version",
-                    "python", "platform", "repeat")
+                    "python_version", "os", "architecture", "repeat")
         if any(key not in provenance for key in required):
             raise EvolutionError("Benchmark provenance is incomplete")
         return {key: provenance[key] for key in required} | {

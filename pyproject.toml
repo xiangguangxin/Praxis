@@ -21,6 +21,7 @@ browser = ["playwright>=1.49,<2"]
 praxis = "praxis_agent.cli:main"
 praxis-benchmark = "praxis_agent.benchmark:main"
 praxis-experience = "praxis_agent.experience_cli:main"
+praxis-evolution = "praxis_agent.evolution_cli:main"
 openas-gui = "praxis_agent.cli:main"
 openas-benchmark = "praxis_agent.benchmark:main"
 openas-experience = "praxis_agent.experience_cli:main"
