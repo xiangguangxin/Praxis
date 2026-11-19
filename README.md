@@ -184,3 +184,30 @@ The project was extracted from [OpenAS](https://github.com/xiangguangxin/OpenAS)
 Praxis 从 OpenAS 的 GUI Agent Runtime 独立而来，目前支持 **Nova MCP 桌面操作**与 **Playwright 浏览器操作**，提供 checkpoint 恢复、敏感操作审批、可选的独立文件验收、Benchmark 及经验检索与失效机制。**模拟测试不代表真实桌面端到端验证通过**，经验提示也不会直接变成自动执行命令。
 
 使用 `pip install -e .` 安装，运行 `praxis --help`，完整参数参考 [RUNTIME.md](RUNTIME.md)。OpenAS 继续维护 Agents & Skills，与 Praxis 以工具集成形式协作。
+
+## Integrated planning, model routing and scheduled jobs
+
+The GUI execution loop can now call `ModelPlanner.prepare_plan()` before its first action and checkpoint the validated task DAG. After a failed action, it may request a bounded revised plan (up to three replans). The plan is guidance only: each GUI action still requires a fresh observation, schema validation and the existing approval policy.
+
+Optional model routing uses a JSON profile file:
+
+```json
+{
+  "default": "economy",
+  "profiles": [
+    {"name":"economy","model":"small-model","endpoint":"https://provider.example/v1/chat/completions","api_key_env":"SMALL_MODEL_KEY","capabilities":["chat"],"max_cost_tier":1},
+    {"name":"vision","model":"vision-model","endpoint":"https://provider.example/v1/chat/completions","api_key_env":"VISION_MODEL_KEY","capabilities":["chat","vision"],"max_cost_tier":3}
+  ]
+}
+```
+
+Use `--model-profiles ./models.json` with `praxis run` or `resume`. The router selects a vision-capable profile when screenshots are present and prefers a higher cost tier after failed actions. Set each profile's API key environment variable before running. Routing never bypasses action approvals.
+
+Queue a goal for a bounded local worker:
+
+```bash
+praxis schedule --database ./praxis-jobs.sqlite --goal "Inspect the report" --criterion "Report was verified"
+praxis worker --database ./praxis-jobs.sqlite --checkpoint-dir ./job-checkpoints --max-jobs 1 --nova /path/to/nova --model-profiles ./models.json
+```
+
+The worker exits after at most `--max-jobs`, stores a checkpoint per job, and marks only an agent result with status `completed` as a completed job. Paused or blocked goals become failed queue entries for operator follow-up; they are not silently retried. This is a foreground local worker, not a daemon or distributed scheduler.
