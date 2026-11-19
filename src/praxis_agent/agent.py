@@ -14,6 +14,7 @@ from .diagnostics import error_detail, safe_summary
 from .observations import normalize
 from .validation import validate_action
 from . import tool_trace
+from .planning import TaskPlanRuntime
 
 APPROVAL_TTL = 600
 
@@ -56,6 +57,31 @@ def _verify(state, verifier, evidence, observation):
         _record(state, "completed", level)
     return accepted
 
+
+
+def _task_verification_state(state, task, runtime):
+    task_state = dict(state)
+    task_state["criteria"] = list(task.acceptance)
+    task_state["steps"] = 0
+    task_state["pending_action"] = None
+    task_state["last_result"] = None
+    task_state["artifact_baseline"] = runtime.baselines.get(task.id)
+    return task_state
+
+
+def _prepare_task_verification(state, task, runtime, verifier):
+    if isinstance(verifier, FileVerifier) and task.id not in runtime.baselines:
+        task_state = _task_verification_state(state, task, runtime)
+        verifier.prepare(task_state)
+        runtime.baselines[task.id] = task_state.get("artifact_baseline")
+
+
+def _verify_task(state, task, runtime, verifier):
+    if not isinstance(verifier, (FileVerifier, CriteriaVerifier)):
+        raise ValueError("Task completion requires an independent artifact or criteria verifier")
+    task_state = _task_verification_state(state, task, runtime)
+    result = verifier.evaluate(task_state)
+    return {"passed": result["passed"], "checks": result.get("checks", {})}
 
 def _pause(state, reason):
     state["status"], state["stop_reason"] = "paused", reason
@@ -100,6 +126,10 @@ def _prepare_start(path, *, approval, verifier, backend_scope, policy, approval_
         verifier.prepare(state)
     elif state.get("artifact_baseline") is not None:
         raise ValueError("Resume requires the original artifact verifier")
+    if state.get("task_runtime"):
+        if not isinstance(verifier, (FileVerifier, CriteriaVerifier)):
+            raise ValueError("Resuming task-orchestrated goals requires the original independent verifier")
+        TaskPlanRuntime(state.get("task_plan"), state["criteria"], data=state["task_runtime"])
     if approval_id is not None and (not approval or approval_id != state.get("pending_approval")):
         raise ValueError("Approval ID does not match the pending request")
     return state, True
@@ -176,7 +206,8 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                 should_plan = not state.get("task_plan")
                 failed_since_plan = ((state.get("last_result") or {}).get("ok") is False
                                      and state.get("task_plan_at_step", -1) < state["steps"])
-                if should_plan or (failed_since_plan and state.get("task_plan_replans", 0) < 3):
+                if should_plan or (failed_since_plan and not state.get("task_runtime")
+                                   and state.get("task_plan_replans", 0) < 3):
                     try:
                         state["task_plan"] = planner.prepare_plan(state.copy(), observation)
                         state["task_plan_at_step"] = state["steps"]
@@ -187,7 +218,29 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                     finally:
                         if hasattr(planner, "usage"):
                             state["model_usage"] = dict(planner.usage)
+                    if isinstance(verifier, (FileVerifier, CriteriaVerifier)) and not state.get("task_runtime"):
+                        task_runtime = TaskPlanRuntime(state["task_plan"], state["criteria"])
+                        state["task_runtime"] = task_runtime.to_dict()
+                        _record(state, "task_runtime_enabled", "independent per-task verification")
                     persist(path, state)
+            task_runtime = None
+            active_task = None
+            if state.get("task_runtime"):
+                task_runtime = TaskPlanRuntime(state["task_plan"], state["criteria"], data=state["task_runtime"])
+                active_task = task_runtime.active()
+                if active_task is not None:
+                    _prepare_task_verification(state, active_task, task_runtime, verifier)
+                    state["active_task"] = {"id": active_task.id, "goal": active_task.goal,
+                                            "acceptance": list(active_task.acceptance),
+                                            "attempt": task_runtime.attempts[active_task.id]}
+                else:
+                    state["active_task"] = None
+                    if task_runtime.status == "blocked":
+                        state["status"], state["stop_reason"] = "blocked", "task_plan_blocked"
+                        _record(state, "task_plan_blocked", "No runnable tasks remain")
+                        break
+                state["task_runtime"] = task_runtime.to_dict()
+                persist(path, state)
             try:
                 decision = planner.decide(state.copy(), observation)
             finally:
@@ -199,7 +252,30 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             # An approval is consumed by the immediately following decision only.
             grant, approved = approved, None
             state.pop("pending_review", None)
+            if kind == "task_complete":
+                if task_runtime is None or active_task is None:
+                    raise ValueError("No independently verifiable active task")
+                phase = "task_verification"
+                task_verification = _verify_task(state, active_task, task_runtime, verifier)
+                if task_verification["passed"]:
+                    task_runtime.complete(active_task.id, task_verification)
+                    _record(state, "task_completed", active_task.id)
+                else:
+                    task_runtime.reject(active_task.id, task_verification)
+                    state["last_task_verification"] = {"task_id": active_task.id,
+                                                        "checks": task_verification["checks"],
+                                                        "attempt": task_runtime.attempts[active_task.id]}
+                    state["last_error"] = {"code": "task_acceptance_failed", "phase": phase,
+                                           "may_have_executed": False,
+                                           "recovery": "Inspect failed checks and retry the active task."}
+                    _record(state, "task_acceptance_failed", active_task.id)
+                state["task_runtime"] = task_runtime.to_dict()
+                state["active_task"] = None
+                persist(path, state)
+                continue
             if kind == "complete":
+                if active_task is not None:
+                    raise ValueError("Complete the active task with task_complete before completing the overall goal")
                 phase = "verification"
                 if not _verify(state, verifier, decision.get("evidence", {}), observation):
                     raise ValueError("Missing acceptance evidence for one or more criteria")
@@ -225,7 +301,7 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                 state["tool_selection"] = {"query": query, "offset": offset, "names": names}
                 continue
             if kind != "act" or not isinstance(decision.get("action"), dict):
-                raise ValueError("Planner must choose act, discover, complete or pause")
+                raise ValueError("Planner must choose act, discover, task_complete, complete or pause")
             action = decision["action"]
             if not isinstance(action.get("name"), str) or not action["name"] or not isinstance(action.get("arguments", {}), dict):
                 raise ValueError("Action requires a name and argument object")

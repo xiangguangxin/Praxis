@@ -40,9 +40,10 @@ class CriteriaVerifier:
         self.registry, self.rules = registry, rules
 
     def prepare(self, state):
-        if set(state["criteria"]) != set(self.rules):
-            raise VerificationError("All checkpoint criteria require rules")
+        criteria = state.get("criteria")
+        if not isinstance(criteria, list) or not criteria or not set(criteria).issubset(self.rules):
+            raise VerificationError("Every requested criterion requires a registered rule")
 
     def evaluate(self, state):
         self.prepare(state)
-        return self.registry.evaluate(self.rules)
+        return self.registry.evaluate({key: self.rules[key] for key in state["criteria"]})

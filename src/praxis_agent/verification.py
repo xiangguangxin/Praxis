@@ -139,6 +139,9 @@ class FileVerifier:
             return "unreadable_or_invalid_content", {}
 
     def evaluate(self, state):
+        if (not isinstance(state.get("criteria"), list) or not state["criteria"]
+                or not set(state["criteria"]).issubset(self.rules)):
+            raise ValueError("Every requested criterion requires an artifact rule")
         baseline = state.get("artifact_baseline") or {}
         hashes = baseline.get("sha256", {}) if baseline.get("verifier") == self.identity else {}
         checks = {}

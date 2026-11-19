@@ -57,7 +57,8 @@ def load(path: Path) -> dict[str, Any]:
             or not isinstance(review.get("id"), str) or not isinstance(review.get("arguments"), dict)
             or type(review.get("expires_at")) not in (int, float)):
         raise ValueError("Corrupt pending review")
-    for key in ("last_result", "last_observation", "artifact_verification", "model_usage", "tool_selection"):
+    for key in ("last_result", "last_observation", "artifact_verification", "model_usage", "tool_selection",
+                "task_runtime", "active_task", "last_task_verification"):
         if state.get(key) is not None and not isinstance(state[key], dict):
             raise ValueError("Corrupt checkpoint metadata")
     usage = state.get("model_usage", {})
