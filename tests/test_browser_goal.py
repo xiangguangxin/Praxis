@@ -47,19 +47,27 @@ class PlannerAPI(BaseHTTPRequestHandler):
         observation = json.loads(request["messages"][1]["content"])
         self.requests.append(request)
         self.authorization.append(self.headers.get("Authorization"))
-        step = observation["step"]
-        decisions = (
+        if "decompose user goals" in request["messages"][0]["content"]:
+            decision = {"tasks": [
+                {"id": "build", "goal": "Build instrumented fixture", "dependencies": []},
+                {"id": "run", "goal": "Run SIL cases", "dependencies": ["build"]},
+                {"id": "download", "goal": "Download and verify report", "dependencies": ["run"]}
+            ]}
+        else:
+            step = observation["step"]
+            decisions = (
             action("browser_click", role="button", name="Build instrumented fixture"),
             action("browser_click", role="button", name="Run SIL cases"),
             action("browser_wait_for_text", text="SIL cases passed"),
             action("browser_download", role="link", name="Download MC/DC report", filename="coverage.json"),
             {"type": "complete"},
-        )
+            )
+            decision = decisions[step]
         result = {
             "id": "chatcmpl-openas-fixture", "object": "chat.completion", "created": 1,
             "model": request["model"],
             "choices": [{"index": 0, "finish_reason": "stop",
-                         "message": {"role": "assistant", "content": json.dumps(decisions[step])}}],
+                         "message": {"role": "assistant", "content": json.dumps(decision)}}],
             "usage": {"prompt_tokens": 20, "completion_tokens": 5, "total_tokens": 25},
         }
         payload = json.dumps(result).encode()
@@ -106,7 +114,7 @@ class BrowserGoals(unittest.TestCase):
             self.assertEqual(state["steps"], 4)
             self.assertEqual([event["tool"] for event in state["tool_trace"]["events"]],
                              ["browser_click", "browser_click", "browser_wait_for_text", "browser_download"])
-            self.assertEqual(state["model_usage"]["input_tokens"], 100)
+            self.assertEqual(state["model_usage"]["input_tokens"], 120)
             self.assertEqual(state["artifact_verification"]["checks"][criterion]["status"], "passed")
             self.assertTrue(self.command("cli", "verify", checkpoint, "--verifier", config)["passed"])
             self.assertEqual(self.command("cli", "compare-traces", checkpoint, checkpoint),
@@ -155,14 +163,14 @@ class BrowserGoals(unittest.TestCase):
             self.assertEqual(report["trajectory_pass_rate"], 1)
             self.assertTrue(report["provenance"]["playwright_version"])
             self.assertTrue(all(record["backend_version"] for record in report["records"]))
-            self.assertEqual(report["variants"]["experience"]["avg_tokens"], 125)
+            self.assertEqual(report["variants"]["experience"]["avg_tokens"], 150)
             self.assertEqual(report["variants"]["baseline"]["experience_hint_calls"], 0)
             self.assertEqual(report["variants"]["experience"]["experience_hint_calls"], 5)
             self.assertEqual([record["variant"] for record in report["records"]], ["baseline", "experience"])
             self.assertFalse(any("untrusted_prior_experience_hints" in msg["content"]
                                  for msg in PlannerAPI.requests[0]["messages"]))
             self.assertTrue(any("untrusted_prior_experience_hints" in msg["content"]
-                                for msg in PlannerAPI.requests[5]["messages"]))
+                                for msg in PlannerAPI.requests[7]["messages"]))
 
     @unittest.skipUnless(os.getenv("OPENAS_TEST_LITELLM_EXECUTABLE"), "opt-in test requires a LiteLLM Proxy")
     def test_litellm_proxy_drives_a_browser_benchmark(self):
@@ -228,10 +236,10 @@ class BrowserGoals(unittest.TestCase):
             self.assertEqual(report["success_rate"], 1)
             self.assertEqual(report["model"], alias)
             self.assertEqual(report["provenance"]["model_connection"], "litellm")
-            self.assertEqual(report["avg_tokens"], 125)
+            self.assertEqual(report["avg_tokens"], 150)
             self.assertEqual(state["status"], "completed")
-            self.assertEqual(state["model_usage"]["input_tokens"], 100)
-            self.assertEqual(PlannerAPI.authorization, [f"Bearer {upstream_key}"] * 10)
+            self.assertEqual(state["model_usage"]["input_tokens"], 120)
+            self.assertEqual(PlannerAPI.authorization, [f"Bearer {upstream_key}"] * 12)
             self.assertTrue(all(r["response_format"] == {"type": "json_object"} for r in PlannerAPI.requests))
 
     def test_browser_refuses_other_origin_and_existing_download(self):

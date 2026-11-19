@@ -372,3 +372,19 @@ form fields or a previously open tab. The checkpoint records execution progress,
 not a full browser-session snapshot. Reobserve and verify the application state
 on resume; nontrivial stateful browser recovery and native Nova acceptance need
 separate real-backend validation.
+
+
+## Integrated planning and model routing
+
+When using the standard CLI, ModelPlanner proposes a DAG before its first GUI action. The runtime validates and stores it in the existing goal checkpoint. Failed action outcomes can trigger up to three replanning requests. The DAG is advisory; the normal observe/decide/validate/approve/action loop remains authoritative. Existing checkpoints without a plan acquire one on their next run.
+
+Pass `--model-profiles profiles.json` to enable capability-aware routing. Each profile declares `name`, `model`, `endpoint`, `api_key_env`, `capabilities` and optional `max_cost_tier`. A screenshot request requires a profile with `vision`; a failed action prefers a higher cost tier. API keys are read from the named environment variables, not from the JSON file.
+
+## Local scheduled worker
+
+```sh
+praxis schedule --database ./jobs.sqlite --goal "Inspect report" --criterion "Report verified"
+praxis worker --database ./jobs.sqlite --checkpoint-dir ./checkpoints --max-jobs 1 --nova /path/to/nova
+```
+
+The worker claims due jobs atomically and runs at most the configured count before exiting. It does not run in the background. It records each job's goal checkpoint; only a completed goal becomes a completed queue job. Paused, blocked, and failed goals are marked failed for explicit operator follow-up, not automatically retried. Worker execution requires the same model credentials and optional verifier configuration as a direct run.

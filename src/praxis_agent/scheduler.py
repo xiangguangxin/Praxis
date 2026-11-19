@@ -1,29 +1,41 @@
 """Durable local SQLite job queue; claims due jobs atomically."""
 import json, sqlite3, time, uuid
+from contextlib import contextmanager
 class Scheduler:
     def __init__(self,database):
         self.database=str(database)
-        with self._connect() as db:
+        with self._session() as db:
             db.execute("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, goal TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL, run_at REAL NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, result TEXT, error TEXT)")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_due ON jobs(status,run_at)")
     def _connect(self):
         db=sqlite3.connect(self.database,timeout=10); db.row_factory=sqlite3.Row; return db
+    @contextmanager
+    def _session(self):
+        db=self._connect()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
     def enqueue(self,goal,payload=None,*,run_at=None):
         if not isinstance(goal,str) or not goal.strip(): raise ValueError("goal required")
         if payload is not None and not isinstance(payload,dict): raise ValueError("payload must be object")
         now=time.time(); jid=str(uuid.uuid4())
-        with self._connect() as db:
+        with self._session() as db:
             db.execute("INSERT INTO jobs(id,goal,payload,status,run_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",(jid,goal,json.dumps(payload or {},ensure_ascii=False),"queued",now if run_at is None else float(run_at),now,now))
         return self.get(jid)
     def get(self,jid):
-        with self._connect() as db: row=db.execute("SELECT * FROM jobs WHERE id=?",(jid,)).fetchone()
+        with self._session() as db: row=db.execute("SELECT * FROM jobs WHERE id=?",(jid,)).fetchone()
         if row is None: raise KeyError(jid)
         item=dict(row); item["payload"]=json.loads(item["payload"])
         if item["result"] is not None: item["result"]=json.loads(item["result"])
         return item
     def claim(self,*,now=None):
         now=time.time() if now is None else now
-        with self._connect() as db:
+        with self._session() as db:
             db.execute("BEGIN IMMEDIATE")
             row=db.execute("SELECT * FROM jobs WHERE status='queued' AND run_at<=? ORDER BY run_at,created_at LIMIT 1",(now,)).fetchone()
             if row is None: return None
@@ -32,7 +44,7 @@ class Scheduler:
             item=dict(row); item["payload"]=json.loads(item["payload"]); return item
     def _transition(self,jid,status,**fields):
         now=time.time(); allowed={"completed":{"running"},"failed":{"running"},"queued":{"running"}}
-        with self._connect() as db:
+        with self._session() as db:
             row=db.execute("SELECT status FROM jobs WHERE id=?",(jid,)).fetchone()
             if row is None: raise KeyError(jid)
             if row["status"] not in allowed[status]: raise ValueError("Invalid job transition")
@@ -48,7 +60,7 @@ class Scheduler:
         self._transition(jid,"queued",run_at=time.time() if run_at is None else float(run_at),error=None)
     def list(self,*,status=None,limit=100):
         if type(limit) is not int or not 1<=limit<=1000: raise ValueError("limit must be 1..1000")
-        with self._connect() as db:
+        with self._session() as db:
             rows=db.execute("SELECT * FROM jobs "+("WHERE status=? " if status else "")+"ORDER BY created_at DESC LIMIT ?",((status,limit) if status else (limit,))).fetchall()
         output=[]
         for row in rows:
