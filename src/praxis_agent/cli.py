@@ -44,6 +44,31 @@ def main():
     health.add_argument("--nova")
     health.add_argument("--check-model", action="store_true")
     add_model_arguments(health)
+    scheduled = commands.add_parser("schedule", help="Queue a goal for a bounded local worker")
+    scheduled.add_argument("--database", type=Path, required=True)
+    scheduled.add_argument("--goal", required=True)
+    scheduled.add_argument("--criterion", action="append", required=True)
+    scheduled.add_argument("--run-at", type=float)
+    worker = commands.add_parser("worker", help="Execute up to N due jobs, then exit")
+    worker.add_argument("--database", type=Path, required=True)
+    worker.add_argument("--checkpoint-dir", type=Path, required=True)
+    worker.add_argument("--max-jobs", type=int, default=1)
+    backend = worker.add_mutually_exclusive_group(required=True)
+    backend.add_argument("--nova")
+    backend.add_argument("--browser-url")
+    worker.add_argument("--download-dir", type=Path)
+    worker.add_argument("--browser-executable")
+    add_model_arguments(worker)
+    worker.add_argument("--model-profiles", type=Path)
+    worker.add_argument("--verifier", type=Path)
+    worker.add_argument("--trace-tools", action="store_true")
+    worker.add_argument("--policy", type=Path)
+    worker.add_argument("--max-model-calls", type=int, default=0)
+    worker.add_argument("--max-model-tokens", type=int, default=0)
+    worker.add_argument("--max-ui-text-chars", type=int, default=5000)
+    worker.add_argument("--max-images", type=int, default=1)
+    worker.add_argument("--experience-store", type=Path)
+    worker.add_argument("--experience-environment", default="")
     example = commands.add_parser("demo", help="Run real Chromium with a deterministic fixture planner")
     example.add_argument("--output", type=Path, required=True)
     example.add_argument("--browser-executable")
@@ -69,10 +94,16 @@ def main():
         execution.add_argument("--max-images", type=int, default=1)
         execution.add_argument("--experience-store", type=Path)
         execution.add_argument("--experience-environment", default="")
+        execution.add_argument("--model-profiles", type=Path)
 
     args = parser.parse_args()
     try:
-        if args.command == "create":
+        if args.command == "schedule":
+            from .scheduler import Scheduler
+            result = Scheduler(args.database).enqueue(args.goal, {"criteria": args.criterion}, run_at=args.run_at)
+        elif args.command == "worker":
+            result = _run_worker(args)
+        elif args.command == "create":
             result = create(args.checkpoint, args.goal, args.criterion, max_steps=args.max_steps)
         elif args.command == "doctor":
             from .doctor import doctor
@@ -111,6 +142,7 @@ def _execute(args):
     from .experience import ExperienceStore
     from .planner import ModelPlanner
     from .policy import ActionPolicy
+    from .model_router import ModelRouter
 
     connection = resolve_model_connection(args)
     if args.approval_id and not args.approve_pending:
@@ -123,12 +155,13 @@ def _execute(args):
         raise ValueError("Browser settings require --browser-url")
 
     download_dir = args.download_dir.resolve(strict=True) if args.download_dir else None
+    router = ModelRouter.from_json(args.model_profiles) if args.model_profiles else None
     planner = ModelPlanner(connection.model, connection.api_key, connection.endpoint,
                            max_tokens=args.max_model_tokens,
                            max_calls=args.max_model_calls, max_text_chars=args.max_ui_text_chars,
                            max_images=args.max_images,
                            experience_store=ExperienceStore(args.experience_store) if args.experience_store else None,
-                           experience_environment=args.experience_environment)
+                           experience_environment=args.experience_environment, model_router=router)
     verifier = FileVerifier.from_json(args.verifier) if args.verifier else None
     from .policy import fingerprint
     scope = (browser_scope(args.browser_url, download_dir) if args.browser_url else
@@ -143,3 +176,20 @@ def _execute(args):
 
 if __name__ == "__main__":
     main()
+
+def _run_worker(args):
+    from argparse import Namespace
+    from .scheduler import Scheduler
+    from .worker import Worker
+    scheduler = Scheduler(args.database)
+    args.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    def execute(job):
+        checkpoint = args.checkpoint_dir / (job["id"] + ".json")
+        criteria = job["payload"].get("criteria")
+        if not isinstance(criteria, list) or not criteria:
+            raise ValueError("Scheduled job requires acceptance criteria")
+        create(checkpoint, job["goal"], criteria)
+        values = vars(args).copy()
+        values.update({"command": "run", "checkpoint": checkpoint, "approve_pending": False, "approval_id": None})
+        return _execute(Namespace(**values))
+    return {"jobs": Worker(scheduler, execute).run(max_jobs=args.max_jobs)}
