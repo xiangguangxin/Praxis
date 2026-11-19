@@ -165,13 +165,6 @@ class ModelPlanner:
         budget=self._check_budget(state,messages)
         proposal=self._request(messages,vision=any(isinstance(x,dict) and x.get("type")=="image" for x in observation.get("content",[])),max_tokens=budget)
         graph=DynamicTaskPlanner(lambda _:proposal,max_tasks=12).plan(state["goal"],state["criteria"])
-        covered=set()
-        for task in graph.tasks.values():
-            if not task.acceptance or not set(task.acceptance).issubset(set(state["criteria"])):
-                raise ValueError("Every task acceptance item must exactly match a goal criterion")
-            covered.update(task.acceptance)
-        if covered != set(state["criteria"]):
-            raise ValueError("Task plan must cover every goal criterion")
         self.usage["plan_calls"]+=1
         return graph.to_dict()
 

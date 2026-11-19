@@ -14,7 +14,7 @@ from .diagnostics import error_detail, safe_summary
 from .observations import normalize
 from .validation import validate_action
 from . import tool_trace
-from .planning import TaskPlanRuntime
+from .planning import TaskPlanRuntime, TaskRuntimeError
 
 APPROVAL_TTL = 600
 
@@ -222,9 +222,15 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                         if hasattr(planner, "usage"):
                             state["model_usage"] = dict(planner.usage)
                     if isinstance(verifier, (FileVerifier, CriteriaVerifier)) and not state.get("task_runtime"):
-                        task_runtime = TaskPlanRuntime(state["task_plan"], state["criteria"])
-                        state["task_runtime"] = task_runtime.to_dict()
-                        _record(state, "task_runtime_enabled", "independent per-task verification")
+                        try:
+                            task_runtime = TaskPlanRuntime(state["task_plan"], state["criteria"])
+                        except TaskRuntimeError as exc:
+                            state["task_plan_mode"] = "advisory"
+                            _record(state, "task_plan_advisory", str(exc))
+                        else:
+                            state["task_runtime"] = task_runtime.to_dict()
+                            state["task_plan_mode"] = "verified"
+                            _record(state, "task_runtime_enabled", "independent per-task verification")
                     persist(path, state)
             task_runtime = None
             active_task = None
