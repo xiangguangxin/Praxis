@@ -37,7 +37,7 @@ class ModelRouter:
         return cls(profiles,data["default"])
     def select(self, *, task_type="general", requires_vision=False, risk="low", preferred=None):
         if risk not in {"low","medium","high"}: raise ValueError("Invalid risk")
-        required={"chat","json"} | ({"vision"} if requires_vision else set())
+        required={"chat"} | ({"vision"} if requires_vision else set())
         candidates=[p for p in self.profiles.values() if required <= p.capabilities]
         if preferred:
             p=self.profiles.get(preferred)
