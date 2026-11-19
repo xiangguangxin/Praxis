@@ -1,4 +1,4 @@
-import tempfile, unittest
+import tempfile, unittest, time
 from pathlib import Path
 from praxis_agent.planning.dynamic import DynamicTaskPlanner, PlanError
 from praxis_agent.context import pack_context, ContextBudgetError
@@ -29,9 +29,10 @@ class PlatformExtensionTests(unittest.TestCase):
             with self.assertRaises(ValueError): journal.emit("prompt",run_id="r1")
     def test_scheduler_durable_claim(self):
         with tempfile.TemporaryDirectory() as d:
-            scheduler=Scheduler(Path(d)/"jobs.db"); job=scheduler.enqueue("do work",{"kind":"test"},run_at=10)
-            self.assertIsNone(scheduler.claim(now=9))
-            self.assertEqual(scheduler.claim(now=11)["id"],job["id"])
+            scheduler=Scheduler(Path(d)/"jobs.db"); now=time.time()
+            job=scheduler.enqueue("do work",{"kind":"test"},run_at=now+10)
+            self.assertIsNone(scheduler.claim(now=now+9))
+            self.assertEqual(scheduler.claim(now=now+11)["id"],job["id"])
             scheduler.finish(job["id"],{"ok":True})
             self.assertEqual(scheduler.get(job["id"])["status"],"completed")
             with self.assertRaises(ValueError): scheduler.retry(job["id"])
