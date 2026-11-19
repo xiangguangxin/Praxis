@@ -17,6 +17,7 @@ class TaskOrchestrator:
             raise OrchestrationError("max_tasks must be 1..1000")
         self.graph, self.execute, self.verify = graph, execute, verify
         self.checkpoint = Path(checkpoint)
+        if self.checkpoint.exists(): raise FileExistsError("Refusing to overwrite task checkpoint; use resume()")
         self.max_attempts, self.max_tasks = max_attempts, max_tasks
         self.attempts = {n: 0 for n in graph.tasks}
         self.results, self.events, self.status = {}, [], "ready"
