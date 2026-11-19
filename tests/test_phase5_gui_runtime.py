@@ -52,7 +52,7 @@ class AgentTaskIntegrationTests(unittest.TestCase):
                 return TaskGraph([Task("build","Build",(),("build output exists",)),
                                   Task("report","Report",("build",),("report exists",))]).to_dict()
             def decide(self,state,observation):
-                calls.append(state.get("active_task",{}).get("id"))
+                calls.append((state.get("active_task") or {}).get("id"))
                 if state.get("active_task"): return {"type":"task_complete","evidence":{}}
                 return {"type":"complete","evidence":{}}
         with tempfile.TemporaryDirectory() as folder:
