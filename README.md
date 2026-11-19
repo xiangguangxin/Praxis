@@ -4,7 +4,7 @@
 
 **Goal-Driven Autonomous Agent Runtime**
 
-**Plan. Act. Verify. Learn.**
+**Plan. Act. Verify. Learn. Improve.**
 
 [![CI](https://github.com/xiangguangxin/Praxis/actions/workflows/ci.yml/badge.svg)](https://github.com/xiangguangxin/Praxis/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab)](https://www.python.org/)
@@ -99,7 +99,7 @@ Completion records a `verification_level`: `model_evidence`,
 provenance read as `legacy_unspecified`. The CLI exits with 0 for completed, 3 for
 paused, 4 for blocked and 5 for failed execution.
 
-The planner may assert completion; **without an independent verifier**, this is model-evidence compatibility mode rather than independently established success. If an action's outcome is uncertain after a crash, Praxis blocks replay until the operator reconciles it.
+The planner may assert completion; **without an independent verifier**, this is model-evidence compatibility mode rather than independently established success. Task-level verification failures can trigger a bounded replacement of unfinished DAG work. Uncertain actions still require explicit reconciliation. If an action's outcome is uncertain after a crash, Praxis blocks replay until the operator reconciles it.
 
 ## Autonomous DAG orchestration (Phase 5)\n\nThe reusable `planning` package supports per-node dependencies, acceptance checks, independent verification evidence, bounded retries, checkpoint/resume, explicit interruption reconciliation, and safe replacement of unfinished work while preserving completed nodes. It also supports adding/removing pending nodes. See [Phase 5 orchestration guide](RUNTIME.md#phase-5-autonomous-dag-orchestration). The GUI runtime enforces the validated task plan with independent per-task acceptance checks when a verifier is configured.\n\n## Independent verification
 

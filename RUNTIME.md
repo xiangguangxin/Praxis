@@ -549,3 +549,18 @@ praxis-evolution --store ./evolution.json list --status promoted
 ```
 
 Candidates are not auto-generated from model self-critique. Operators must ground proposals in verified experiences and explicitly promote after paired evaluation. The evolution store records report hashes, decision metrics, promotion time and rollback reason. No source code is self-modified.
+
+
+### Phase 6.2: Failure diagnosis and bounded plan repair
+
+The GUI runtime now classifies failures from host-owned signals before asking the planner to recover. The deterministic taxonomy includes uncertain in-flight actions, operator-policy denial, task/artifact verification failure, transient backend failure, ordinary action failure and exhausted budgets. The diagnosis contains only allowlisted codes, phases and failed-check statuses; it does not copy raw page text, model explanations or artifact contents into the recovery prompt.
+
+For a task-level independent-verification failure, the planner may propose a replacement DAG for unfinished work (maximum three revisions per Goal). The runtime validates the replacement against the original Goal criteria, preserves completed task definitions and results, and resets only the unfinished graph. A failed replan leaves the prior checkpointed graph intact and falls back to its existing bounded retry behavior.
+
+Important boundaries:
+
+- An action with uncertain external outcome is never automatically replanned or replayed; reconciliation remains mandatory.
+- A policy denial is not treated as a recoverable planner error and cannot be bypassed by replanning.
+- The model proposes a new DAG, but local graph validation and independent per-task verification decide whether it is accepted.
+- Completed tasks are immutable during repair. Every replacement task must use exact Goal criterion strings, and the new DAG must cover all Goal criteria.
+- Action failures are diagnosed and exposed to the next planning decision; the runtime does not assume that a model-generated explanation is the cause.

@@ -35,6 +35,32 @@ class TaskPlanRuntime:
                 raise TaskRuntimeError("Corrupt task runtime checkpoint")
         self._validate_acceptance()
 
+    def replace_remaining(self, plan):
+        """Install a validated replacement DAG without redefining completed tasks."""
+        try:
+            replacement = TaskGraph.from_dict(plan) if isinstance(plan, dict) else TaskGraph(plan)
+        except (TaskGraphError, TypeError) as exc:
+            raise TaskRuntimeError("Invalid replacement task plan: " + str(exc)) from exc
+        completed = {name: task for name, task in self.graph.tasks.items()
+                     if self.graph.status[name] == "completed"}
+        for name, task in completed.items():
+            if replacement.tasks.get(name) != task or replacement.status.get(name) != "completed":
+                raise TaskRuntimeError("Replacement must preserve completed task definitions and status")
+        if any(status != "pending" for name, status in replacement.status.items() if name not in completed):
+            raise TaskRuntimeError("Replacement unfinished tasks must all start pending")
+        allowed, covered = set(self.criteria), set()
+        for task in replacement.tasks.values():
+            if not task.acceptance or not set(task.acceptance).issubset(allowed):
+                raise TaskRuntimeError("Replacement task acceptance must match Goal criteria")
+            covered.update(task.acceptance)
+        if covered != allowed:
+            raise TaskRuntimeError("Replacement plan must cover every Goal criterion")
+        self.graph = replacement
+        self.attempts = {name: self.attempts.get(name, 0) for name in self.graph.tasks}
+        self.results = {name: value for name, value in self.results.items() if name in completed}
+        self.baselines = {name: value for name, value in self.baselines.items() if name in completed}
+        self._event("remaining_plan_replaced", "", "preserved " + str(len(completed)) + " completed tasks")
+
     def _validate_acceptance(self):
         allowed, covered = set(self.criteria), set()
         for task in self.graph.tasks.values():

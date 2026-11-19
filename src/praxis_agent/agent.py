@@ -15,6 +15,7 @@ from .observations import normalize
 from .validation import validate_action
 from . import tool_trace
 from .planning import TaskPlanRuntime, TaskRuntimeError
+from .failure_analysis import analyze_failure
 
 APPROVAL_TTL = 600
 
@@ -195,6 +196,14 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
         phase = "observation"
         try:
             observation = normalize(desktop.observe())
+            failure_analysis = analyze_failure(state)
+            if failure_analysis is not None:
+                if state.get("failure_analysis") != failure_analysis:
+                    state["failure_analysis"] = failure_analysis
+                    _record(state, "failure_analyzed", failure_analysis["category"])
+                    persist(path, state)
+            elif (state.get("last_result") or {}).get("ok") is True:
+                state.pop("failure_analysis", None)
             state["last_observation"] = {"observed_at": observation["observed_at"],
                                          "observation_id": observation["observation_id"],
                                          "summary": safe_summary(observation.get("summary", ""))}
@@ -277,6 +286,9 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                 task_verification = _verify_task(state, active_task, task_runtime, verifier)
                 if task_verification["passed"]:
                     task_runtime.complete(active_task.id, task_verification)
+                    state.pop("last_task_verification", None)
+                    state.pop("last_error", None)
+                    state.pop("failure_analysis", None)
                     _record(state, "task_completed", active_task.id)
                 else:
                     task_runtime.reject(active_task.id, task_verification)
@@ -286,7 +298,24 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                     state["last_error"] = {"code": "task_acceptance_failed", "phase": phase,
                                            "may_have_executed": False,
                                            "recovery": "Inspect failed checks and retry the active task."}
+                    state["failure_analysis"] = analyze_failure(state)
                     _record(state, "task_acceptance_failed", active_task.id)
+                    if (callable(getattr(planner, "replan_tasks", None))
+                            and state.get("task_plan_replans", 0) < 3):
+                        state["task_runtime"] = task_runtime.to_dict()
+                        state["active_task"] = None
+                        try:
+                            revised = planner.replan_tasks(state.copy(), observation)
+                            task_runtime.replace_remaining(revised)
+                            state["task_plan"] = revised
+                            state["task_plan_replans"] = state.get("task_plan_replans", 0) + 1
+                            _record(state, "task_plan_revised_after_failure",
+                                    "revision " + str(state["task_plan_replans"]))
+                        except Exception as exc:
+                            _record(state, "task_replan_failed", type(exc).__name__)
+                        finally:
+                            if hasattr(planner, "usage"):
+                                state["model_usage"] = dict(planner.usage)
                 state["task_runtime"] = task_runtime.to_dict()
                 state["active_task"] = None
                 persist(path, state)
@@ -331,6 +360,8 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                 state["status"], state["stop_reason"] = "blocked", "policy_denied"
                 state["last_error"] = {"code": "policy_denied", "phase": phase, "may_have_executed": False,
                                        "recovery": "Review the operator policy and create a new authorized goal."}
+                state["failure_analysis"] = analyze_failure(state)
+                _record(state, "failure_analyzed", state["failure_analysis"]["category"])
                 _record(state, "policy_denied", action["name"])
                 break
             scope = {"backend": backend_scope, "target": observation.get("action_scope"),
@@ -367,6 +398,12 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             discoveries = 0
             state["pending_action"] = None
             state["last_result"] = {"ok": ok, "summary": safe_summary(result.get("summary", ""))}
+            if ok:
+                state.pop("last_error", None)
+                state.pop("failure_analysis", None)
+            else:
+                state["failure_analysis"] = analyze_failure(state)
+                _record(state, "failure_analyzed", state["failure_analysis"]["category"])
             known = {tool.get("name") for tool in observation.get("tools", []) if isinstance(tool, dict)}
             recent.append({"tool": action["name"] if action["name"] in known else None,
                            "ok": ok, "step": state["steps"], "repeat_id": repeat_id})
@@ -391,6 +428,8 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             detail = error_detail(exc, phase, bool(state["pending_action"]))
             state["last_error"] = detail
             state["last_result"] = {"ok": False, "summary": detail["message"], "code": detail["code"], "phase": phase}
+            state["failure_analysis"] = analyze_failure(state)
+            _record(state, "failure_analyzed", state["failure_analysis"]["category"])
             _record(state, "error", f"{phase}: {detail['code']}")
             if state["pending_action"] or state["failures"] >= 3:
                 state["status"] = "blocked"
