@@ -73,6 +73,8 @@ def main():
     worker.add_argument("--max-images", type=int, default=1)
     worker.add_argument("--experience-store", type=Path)
     worker.add_argument("--experience-environment", default="")
+    worker.add_argument("--evolution-store", type=Path)
+    worker.add_argument("--evolution-environment", default="")
     example = commands.add_parser("demo", help="Run real Chromium with a deterministic fixture planner")
     example.add_argument("--output", type=Path, required=True)
     example.add_argument("--browser-executable")
@@ -98,6 +100,9 @@ def main():
         execution.add_argument("--max-images", type=int, default=1)
         execution.add_argument("--experience-store", type=Path)
         execution.add_argument("--experience-environment", default="")
+        execution.add_argument("--evolution-store", type=Path)
+        execution.add_argument("--evolution-environment", default="")
+        execution.add_argument("--strategy-candidate-id", help="Preview an unpromoted strategy for paired evaluation only")
         execution.add_argument("--model-profiles", type=Path)
 
     args = parser.parse_args()
@@ -155,6 +160,10 @@ def _execute(args):
         raise ValueError("Token limits must be nonnegative")
     if bool(args.experience_store) != bool(args.experience_environment):
         raise ValueError("--experience-store and --experience-environment must be used together")
+    if bool(args.evolution_store) != bool(args.evolution_environment):
+        raise ValueError("--evolution-store and --evolution-environment must be used together")
+    if args.strategy_candidate_id and not args.evolution_store:
+        raise ValueError("--strategy-candidate-id requires --evolution-store")
     if not args.browser_url and (args.download_dir is not None or args.browser_executable):
         raise ValueError("Browser settings require --browser-url")
 
@@ -165,7 +174,10 @@ def _execute(args):
                            max_calls=args.max_model_calls, max_text_chars=args.max_ui_text_chars,
                            max_images=args.max_images,
                            experience_store=ExperienceStore(args.experience_store) if args.experience_store else None,
-                           experience_environment=args.experience_environment, model_router=router)
+                           experience_environment=args.experience_environment, model_router=router,
+                           evolution_store=__import__("praxis_agent.evolution", fromlist=["EvolutionStore"]).EvolutionStore(args.evolution_store) if args.evolution_store else None,
+                           evolution_environment=args.evolution_environment,
+                           strategy_candidate_id=getattr(args, "strategy_candidate_id", None))
     verifier = FileVerifier.from_json(args.verifier) if args.verifier else None
     from .policy import fingerprint
     scope = (browser_scope(args.browser_url, download_dir) if args.browser_url else

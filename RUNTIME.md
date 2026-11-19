@@ -496,3 +496,56 @@ The library-level `TaskOrchestrator` can execute independent DAG branches concur
 - The GUI `TaskPlanRuntime` remains single-task-at-a-time for one shared desktop session. Parallelism is intended for independent task adapters and separate execution contexts, not concurrent clicks in one desktop session.
 
 A snapshot includes an `aggregate` object with total tasks, counts by status and total attempts, alongside each task's result and verification evidence. The plan checkpoint is locked while it runs or is mutated; after a process interruption, every node recorded as running becomes blocked and requires explicit reconciliation.
+
+
+## Phase 6: evidence-gated self-evolution
+
+Praxis separates **experience memory** from **strategy promotion**. A completed, independently file-verified run may be curated into the existing ExperienceStore. A strategy proposal must cite an active verified experience, is stored as an inert candidate, and is never sent to the planner unless explicitly selected for a paired candidate evaluation. Normal runs retrieve only promoted strategies.
+
+### Propose and evaluate a strategy
+
+```sh
+# Curate a source run first (requires independent file verification).
+praxis-experience --store ./experiences.json add ./goal-state.json \
+  --verifier ./rules.json --environment win11-app-v1 \
+  --note "Artifact independently checked"
+
+# Create an inert strategy candidate grounded in that experience.
+praxis-evolution --store ./evolution.json propose \
+  --experience-store ./experiences.json \
+  --source-experience-id <experience-id> \
+  --goal "Generate the coverage report" --environment win11-app-v1 \
+  --instruction "Check the build summary before opening the report." \
+  --rationale "The verified run consistently exposed build status first."
+
+# Run paired baseline and candidate variants against the same live suite.
+praxis-benchmark ./suite.json --browser-url http://127.0.0.1:8080/ \
+  --repeat 10 --evolution-store ./evolution.json \
+  --evolution-environment win11-app-v1 --strategy-candidate-id <strategy-id> \
+  --allow-failures --output ./paired-evaluation.json
+
+# Evaluate, then explicitly promote only if the evidence gate passes.
+praxis-evolution --store ./evolution.json evaluate <strategy-id> \
+  --report ./paired-evaluation.json
+praxis-evolution --store ./evolution.json promote <strategy-id> \
+  --experience-store ./experiences.json
+```
+
+The paired evaluator requires identical scenario/iteration keys and matching provenance (suite hash, runtime source hash/version, Python/OS/architecture, repeat count, model, connection kind and model budget), at least 10 paired runs, at least 10 percentage points of success-rate improvement, more paired wins than losses, no regression in independently verified completions, and no net regression in recorded trajectories. A strategy that fails any gate remains a candidate and cannot be promoted. These conservative thresholds are an initial engineering gate, not a statistical proof of generalization; use larger, held-out suites before production promotion.
+
+After promotion, normal runs may retrieve matching strategies as bounded, **untrusted planning hints**:
+
+```sh
+praxis run ./goal-state.json --browser-url http://127.0.0.1:8080/ \
+  --evolution-store ./evolution.json --evolution-environment win11-app-v1
+```
+
+A strategy never grants tool permissions, bypasses action validation, or supplies evidence of completion. To remove a strategy from retrieval, explicitly roll it back:
+
+```sh
+praxis-evolution --store ./evolution.json rollback <strategy-id> \
+  --reason "Target application changed"
+praxis-evolution --store ./evolution.json list --status promoted
+```
+
+Candidates are not auto-generated from model self-critique. Operators must ground proposals in verified experiences and explicitly promote after paired evaluation. The evolution store records report hashes, decision metrics, promotion time and rollback reason. No source code is self-modified.

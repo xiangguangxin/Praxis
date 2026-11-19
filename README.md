@@ -10,7 +10,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-059669)](LICENSE)
 
-[Demo & acceptance](docs/ACCEPTANCE.md) · [Quick start](#quick-start) · [Architecture](#architecture) · [Verification](#independent-verification) · [Experience](#experience-memory) · [Benchmarks](#benchmark--evaluation) · [中文](#中文介绍)
+[Demo & acceptance](docs/ACCEPTANCE.md) · [Quick start](#quick-start) · [Architecture](#architecture) · [Verification](#independent-verification) · [Experience](#experience-memory) · [Self-evolution](#self-evolution) · [Benchmarks](#benchmark--evaluation) · [中文](#中文介绍)
 
 </div>
 
@@ -25,7 +25,7 @@ Praxis is a **goal-driven agent execution runtime** extracted from [OpenAS](http
 | **Plan** | Multimodal planner plus validated, mutable DAG orchestration with per-node acceptance checks |
 | **Act** | Tool adapters for authorized Nova MCP desktops or Playwright browser sessions |
 | **Verify** | Optional independent allowlisted file checks, provenance, freshness, and tool trajectory rules |
-| **Learn** | Curated local experiences, environment-specific retrieval, confidence decay, manual feedback and invalidation |
+| **Learn** | Curated verified experiences plus benchmark-gated, versioned strategy promotion and rollback |
 | **Recover** | Durable checkpoint, process lock, manual reconciliation after uncertain actions |
 
 ## Quick start
@@ -101,7 +101,7 @@ paused, 4 for blocked and 5 for failed execution.
 
 The planner may assert completion; **without an independent verifier**, this is model-evidence compatibility mode rather than independently established success. If an action's outcome is uncertain after a crash, Praxis blocks replay until the operator reconciles it.
 
-## Autonomous DAG orchestration (Phase 5)\n\nThe reusable `planning` package supports per-node dependencies, acceptance checks, independent verification evidence, bounded retries, checkpoint/resume, explicit interruption reconciliation, and safe replacement of unfinished work while preserving completed nodes. It also supports adding/removing pending nodes. See [Phase 5 orchestration guide](RUNTIME.md#phase-5-autonomous-dag-orchestration). This is currently a library-level primitive, not yet the default GUI `praxis run` executor.\n\n## Independent verification
+## Autonomous DAG orchestration (Phase 5)\n\nThe reusable `planning` package supports per-node dependencies, acceptance checks, independent verification evidence, bounded retries, checkpoint/resume, explicit interruption reconciliation, and safe replacement of unfinished work while preserving completed nodes. It also supports adding/removing pending nodes. See [Phase 5 orchestration guide](RUNTIME.md#phase-5-autonomous-dag-orchestration). The GUI runtime enforces the validated task plan with independent per-task acceptance checks when a verifier is configured.\n\n## Independent verification
 
 Use a trusted verifier rules file, mapped to the checkpoint criteria:
 
@@ -213,3 +213,10 @@ praxis worker --database ./praxis-jobs.sqlite --checkpoint-dir ./job-checkpoints
 The worker exits after at most `--max-jobs`, stores a checkpoint per job, and marks only an agent result with status `completed` as a completed job. Each claimed job has a renewable lease and fencing token; a heartbeat thread renews long-running work, expired leases are recovered after process crashes, and stale workers cannot publish a result after a new worker reclaims the job. Paused or blocked goals become failed queue entries for operator follow-up; explicit retry resets the attempt budget. This is a foreground local worker backed by SQLite, not a remote distributed scheduler.
 
 The library-level DAG orchestrator can run independent task callbacks concurrently with `max_workers`, serialize tasks that share declared resource names, and aggregate per-task results and verification evidence. The integrated GUI runtime remains serial for one shared desktop session. See the Phase 5.4 guide in [RUNTIME.md](RUNTIME.md#parallel-task-execution-and-resource-locks-phase-54).
+
+
+## Self-evolution
+
+Praxis keeps learning conservative and auditable: a strategy candidate must cite an active independently verified experience, pass paired baseline-vs-candidate benchmark evaluation with matching provenance, and be explicitly promoted before normal planners can retrieve it. Candidates are never silently activated. Promoted strategies remain untrusted hints; they cannot authorize tools or satisfy acceptance criteria. Rollback immediately removes a strategy from retrieval.
+
+See the [Phase 6 self-evolution guide](RUNTIME.md#phase-6-evidence-gated-self-evolution) for the full proposal → paired evaluation → promotion → rollback workflow. This phase does not self-modify runtime source code.
