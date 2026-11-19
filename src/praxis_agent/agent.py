@@ -360,6 +360,8 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                 state["status"], state["stop_reason"] = "blocked", "policy_denied"
                 state["last_error"] = {"code": "policy_denied", "phase": phase, "may_have_executed": False,
                                        "recovery": "Review the operator policy and create a new authorized goal."}
+                state["failure_analysis"] = analyze_failure(state)
+                _record(state, "failure_analyzed", state["failure_analysis"]["category"])
                 _record(state, "policy_denied", action["name"])
                 break
             scope = {"backend": backend_scope, "target": observation.get("action_scope"),
@@ -399,6 +401,9 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             if ok:
                 state.pop("last_error", None)
                 state.pop("failure_analysis", None)
+            else:
+                state["failure_analysis"] = analyze_failure(state)
+                _record(state, "failure_analyzed", state["failure_analysis"]["category"])
             known = {tool.get("name") for tool in observation.get("tools", []) if isinstance(tool, dict)}
             recent.append({"tool": action["name"] if action["name"] in known else None,
                            "ok": ok, "step": state["steps"], "repeat_id": repeat_id})
@@ -423,6 +428,8 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             detail = error_detail(exc, phase, bool(state["pending_action"]))
             state["last_error"] = detail
             state["last_result"] = {"ok": False, "summary": detail["message"], "code": detail["code"], "phase": phase}
+            state["failure_analysis"] = analyze_failure(state)
+            _record(state, "failure_analyzed", state["failure_analysis"]["category"])
             _record(state, "error", f"{phase}: {detail['code']}")
             if state["pending_action"] or state["failures"] >= 3:
                 state["status"] = "blocked"
