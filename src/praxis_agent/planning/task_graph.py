@@ -88,10 +88,10 @@ class TaskGraph:
             raise TaskGraphError("Only existing pending tasks can be removed")
         if any(name in task.dependencies for task in self.tasks.values()):
             raise TaskGraphError("Cannot remove a task with dependents")
+        if len(self.tasks) == 1:
+            raise TaskGraphError("A plan must retain at least one task")
         del self.tasks[name]
         del self.status[name]
-        if not self.tasks:
-            raise TaskGraphError("A plan must retain at least one task")
 
     def replace_pending(self, tasks):
         """Replace the unfinished subgraph while preserving completed nodes verbatim."""
