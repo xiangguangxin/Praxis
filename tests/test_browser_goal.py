@@ -170,7 +170,7 @@ class BrowserGoals(unittest.TestCase):
             self.assertFalse(any("untrusted_prior_experience_hints" in msg["content"]
                                  for msg in PlannerAPI.requests[0]["messages"]))
             self.assertTrue(any("untrusted_prior_experience_hints" in msg["content"]
-                                for msg in PlannerAPI.requests[6]["messages"]))
+                                for msg in PlannerAPI.requests[7]["messages"]))
 
     @unittest.skipUnless(os.getenv("OPENAS_TEST_LITELLM_EXECUTABLE"), "opt-in test requires a LiteLLM Proxy")
     def test_litellm_proxy_drives_a_browser_benchmark(self):
