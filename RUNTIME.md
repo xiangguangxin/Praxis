@@ -452,7 +452,7 @@ orchestrator.replan_with(
 )
 ```
 
-The DAG orchestrator is a library-level orchestration primitive. It is not yet the default executor inside the GUI `praxis run` loop; that integration requires a task adapter contract and per-node independent verification configuration. Its checkpoint is separate from the top-level Goal checkpoint.
+The parallel `TaskOrchestrator` remains a library-level orchestration primitive with its own checkpoint and injected task adapter. The GUI `praxis run` loop uses the integrated `TaskPlanRuntime` serially for one shared desktop session; it does not dispatch concurrent clicks against the same live desktop. Per-task GUI acceptance still requires an independent verifier.
 
 
 ### GUI task-DAG execution (Phase 5.2)

@@ -211,3 +211,5 @@ praxis worker --database ./praxis-jobs.sqlite --checkpoint-dir ./job-checkpoints
 ```
 
 The worker exits after at most `--max-jobs`, stores a checkpoint per job, and marks only an agent result with status `completed` as a completed job. Each claimed job has a renewable lease and fencing token; a heartbeat thread renews long-running work, expired leases are recovered after process crashes, and stale workers cannot publish a result after a new worker reclaims the job. Paused or blocked goals become failed queue entries for operator follow-up; explicit retry resets the attempt budget. This is a foreground local worker backed by SQLite, not a remote distributed scheduler.
+
+The library-level DAG orchestrator can run independent task callbacks concurrently with `max_workers`, serialize tasks that share declared resource names, and aggregate per-task results and verification evidence. The integrated GUI runtime remains serial for one shared desktop session. See the Phase 5.4 guide in [RUNTIME.md](RUNTIME.md#parallel-task-execution-and-resource-locks-phase-54).
