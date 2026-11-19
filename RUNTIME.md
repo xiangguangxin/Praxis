@@ -388,3 +388,55 @@ praxis worker --database ./jobs.sqlite --checkpoint-dir ./checkpoints --max-jobs
 ```
 
 The worker claims due jobs atomically and runs at most the configured count before exiting. It does not run in the background. It records each job's goal checkpoint; only a completed goal becomes a completed queue job. Paused, blocked, and failed goals are marked failed for explicit operator follow-up, not automatically retried. Worker execution requires the same model credentials and optional verifier configuration as a direct run.
+
+
+## Phase 5: autonomous DAG orchestration
+
+The reusable `planning` package provides a checkpointed DAG orchestrator for workflows that need independently verified subtasks:
+
+- Each node has its own ID, goal, dependencies, observable acceptance checks, status, attempt count and verification evidence.
+- Only pending nodes whose dependencies are independently verified as completed can start.
+- The verifier callback is invoked separately for every node. A passing model statement alone is not an independent verifier; use a trusted artifact or domain-specific verifier.
+- Failed nodes retry only within the configured attempt budget. Exhausted failures block descendants while independent branches can continue.
+- A running node found after process interruption becomes blocked and requires explicit reconciliation. The orchestrator never blindly replays an interrupted node.
+- Pending nodes can be added or removed, and unfinished work can be replaced by a newly proposed DAG. Completed nodes and their definitions are immutable across replans.
+- Every transition, retry, verification, mutation and replan is recorded in the atomic orchestration checkpoint.
+
+Library example:
+
+```python
+from pathlib import Path
+from praxis_agent.planning import Task, TaskGraph, TaskOrchestrator, DynamicTaskPlanner
+
+graph = TaskGraph([
+    Task("build", "Build the instrumented application", (),
+         ("Fresh binary exists", "Build log has no errors")),
+    Task("test", "Run the SIL suite", ("build",),
+         ("All required SIL cases passed",)),
+    Task("report", "Export the MC/DC report", ("test",),
+         ("New report exists and parses",)),
+])
+
+orchestrator = TaskOrchestrator(
+    graph,
+    execute=execute_task,       # Your authorized task adapter
+    verify=verify_task,         # Independent verifier for this task
+    checkpoint=Path("workflow.json"),
+    max_attempts=2,
+)
+result = orchestrator.run(max_tasks=10)
+
+# After a pause, load the exact checkpoint and resume.
+orchestrator = TaskOrchestrator.resume(
+    "workflow.json", execute_task, verify_task
+)
+
+# If the workflow changes, replace only unfinished work.
+planner = DynamicTaskPlanner(propose_task_dag)
+orchestrator.replan_with(
+    planner, goal, criteria, context=latest_observation,
+    reason="The original report export path is unavailable",
+)
+```
+
+The DAG orchestrator is a library-level orchestration primitive. It is not yet the default executor inside the GUI `praxis run` loop; that integration requires a task adapter contract and per-node independent verification configuration. Its checkpoint is separate from the top-level Goal checkpoint.
