@@ -101,7 +101,7 @@ paused, 4 for blocked and 5 for failed execution.
 
 The planner may assert completion; **without an independent verifier**, this is model-evidence compatibility mode rather than independently established success. If an action's outcome is uncertain after a crash, Praxis blocks replay until the operator reconciles it.
 
-## Autonomous DAG orchestration (Phase 5)\n\nThe reusable `planning` package supports per-node dependencies, acceptance checks, independent verification evidence, bounded retries, checkpoint/resume, explicit interruption reconciliation, and safe replacement of unfinished work while preserving completed nodes. It also supports adding/removing pending nodes. See [Phase 5 orchestration guide](RUNTIME.md#phase-5-autonomous-dag-orchestration). This is currently a library-level primitive, not yet the default GUI `praxis run` executor.\n\n## Independent verification
+## Autonomous DAG orchestration (Phase 5)\n\nThe reusable `planning` package supports per-node dependencies, acceptance checks, independent verification evidence, bounded retries, checkpoint/resume, explicit interruption reconciliation, and safe replacement of unfinished work while preserving completed nodes. It also supports adding/removing pending nodes. See [Phase 5 orchestration guide](RUNTIME.md#phase-5-autonomous-dag-orchestration). The GUI runtime enforces the validated task plan with independent per-task acceptance checks when a verifier is configured.\n\n## Independent verification
 
 Use a trusted verifier rules file, mapped to the checkpoint criteria:
 

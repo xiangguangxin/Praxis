@@ -527,7 +527,8 @@ praxis-benchmark ./suite.json --browser-url http://127.0.0.1:8080/ \
 # Evaluate, then explicitly promote only if the evidence gate passes.
 praxis-evolution --store ./evolution.json evaluate <strategy-id> \
   --report ./paired-evaluation.json
-praxis-evolution --store ./evolution.json promote <strategy-id>
+praxis-evolution --store ./evolution.json promote <strategy-id> \
+  --experience-store ./experiences.json
 ```
 
 The paired evaluator requires identical scenario/iteration keys and matching provenance (suite hash, runtime source hash/version, Python/OS/architecture, repeat count, model, connection kind and model budget), at least 10 paired runs, at least 10 percentage points of success-rate improvement, more paired wins than losses, no regression in independently verified completions, and no net regression in recorded trajectories. A strategy that fails any gate remains a candidate and cannot be promoted. These conservative thresholds are an initial engineering gate, not a statistical proof of generalization; use larger, held-out suites before production promotion.
