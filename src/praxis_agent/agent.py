@@ -15,7 +15,6 @@ from .observations import normalize
 from .validation import validate_action
 from . import tool_trace
 from .planning import TaskPlanRuntime
-from .planning import TaskPlanRuntime
 
 APPROVAL_TTL = 600
 
@@ -85,29 +84,7 @@ def _verify_task(state, task, runtime, verifier):
     return {"passed": result["passed"], "checks": result.get("checks", {})}
 
 
-def _task_verification_state(state, task, runtime):
-    task_state = dict(state)
-    task_state["criteria"] = list(task.acceptance)
-    task_state["steps"] = 0
-    task_state["pending_action"] = None
-    task_state["last_result"] = None
-    task_state["artifact_baseline"] = runtime.baselines.get(task.id)
-    return task_state
 
-
-def _prepare_task_verification(state, task, runtime, verifier):
-    if isinstance(verifier, FileVerifier) and task.id not in runtime.baselines:
-        task_state = _task_verification_state(state, task, runtime)
-        verifier.prepare(task_state)
-        runtime.baselines[task.id] = task_state.get("artifact_baseline")
-
-
-def _verify_task(state, task, runtime, verifier):
-    if not isinstance(verifier, (FileVerifier, CriteriaVerifier)):
-        raise ValueError("Task completion requires an independent artifact or criteria verifier")
-    task_state = _task_verification_state(state, task, runtime)
-    result = verifier.evaluate(task_state)
-    return {"passed": result["passed"], "checks": result.get("checks", {})}
 
 def _pause(state, reason):
     state["status"], state["stop_reason"] = "paused", reason
@@ -152,10 +129,6 @@ def _prepare_start(path, *, approval, verifier, backend_scope, policy, approval_
         verifier.prepare(state)
     elif state.get("artifact_baseline") is not None:
         raise ValueError("Resume requires the original artifact verifier")
-    if state.get("task_runtime"):
-        if not isinstance(verifier, (FileVerifier, CriteriaVerifier)):
-            raise ValueError("Resuming task-orchestrated goals requires the original independent verifier")
-        TaskPlanRuntime(state.get("task_plan"), state["criteria"], data=state["task_runtime"])
     if state.get("task_runtime"):
         if not isinstance(verifier, (FileVerifier, CriteriaVerifier)):
             raise ValueError("Resuming task-orchestrated goals requires the original independent verifier")
