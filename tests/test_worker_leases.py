@@ -17,13 +17,14 @@ class WorkerLeaseTests(unittest.TestCase):
 
     def test_claim_heartbeat_and_fenced_finish(self):
         job=self.scheduler.enqueue("long job",run_at=0)
-        first=self.scheduler.claim(now=100,lease_seconds=10,owner="worker-a")
+        now=time.time()
+        first=self.scheduler.claim(now=now,lease_seconds=10,owner="worker-a")
         self.assertEqual(first["attempts"],1)
         beat=self.scheduler.heartbeat(job["id"],lease_token=first["lease_token"],
-                                      owner="worker-a",now=105,lease_seconds=10)
-        self.assertEqual(beat["lease_expires_at"],115)
-        self.assertIsNone(self.scheduler.claim(now=111,lease_seconds=10,owner="worker-b"))
-        second=self.scheduler.claim(now=116,lease_seconds=10,owner="worker-b")
+                                      owner="worker-a",now=now+5,lease_seconds=10)
+        self.assertEqual(beat["lease_expires_at"],now+15)
+        self.assertIsNone(self.scheduler.claim(now=now+11,lease_seconds=10,owner="worker-b"))
+        second=self.scheduler.claim(now=now+16,lease_seconds=10,owner="worker-b")
         self.assertEqual(second["attempts"],2)
         with self.assertRaises(LeaseLost):
             self.scheduler.finish(job["id"],{"status":"completed"},
@@ -42,7 +43,7 @@ class WorkerLeaseTests(unittest.TestCase):
         current=self.scheduler.get(job["id"])
         self.assertEqual(current["status"],"failed")
         self.assertIn("attempt limit",current["error"])
-        self.assertIsNone(current["lease_token"])
+        self.assertNotIn("lease_token",current)
 
     def test_failed_job_can_be_explicitly_retried_with_fresh_attempt_budget(self):
         job=self.scheduler.enqueue("retry me",max_attempts=1)
@@ -79,7 +80,8 @@ class WorkerLeaseTests(unittest.TestCase):
         self.assertEqual(self.scheduler.get(job["id"])["status"],"completed")
 
     def test_legacy_database_is_migrated_without_losing_jobs(self):
-        db=sqlite3.connect(self.db)
+        legacy_db=Path(self.temp.name)/"legacy.sqlite"
+        db=sqlite3.connect(legacy_db)
         db.execute("""CREATE TABLE jobs (
             id TEXT PRIMARY KEY, goal TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL,
             run_at REAL NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL,
@@ -87,7 +89,7 @@ class WorkerLeaseTests(unittest.TestCase):
         db.execute("INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?)",
                    ("legacy","Old goal","{}","queued",0,1,1,0,None,None))
         db.commit(); db.close()
-        migrated=Scheduler(self.db)
+        migrated=Scheduler(legacy_db)
         claim=migrated.claim(now=2)
         self.assertEqual(claim["id"],"legacy")
         self.assertEqual(claim["max_attempts"],3)

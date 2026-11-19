@@ -150,6 +150,21 @@ class Scheduler:
                 (now, now + duration, now, jid, owner, lease_token))
         return {"job_id": jid, "heartbeat_at": now, "lease_expires_at": now + duration}
 
+    def _resolve_token(self, jid, lease_token, owner):
+        owner = self.worker_id if owner is None else owner
+        if lease_token is not None:
+            return lease_token, owner
+        # Backward-compatible convenience for callers using the same Scheduler
+        # instance that claimed the job; a different owner cannot infer a token.
+        with self._session() as db:
+            row = db.execute("""SELECT status,lease_owner,lease_token,lease_expires_at
+                FROM jobs WHERE id=?""", (jid,)).fetchone()
+        if (row is None or row["status"] != "running" or row["lease_owner"] != owner
+                or not row["lease_token"] or row["lease_expires_at"] is None
+                or row["lease_expires_at"] <= time.time()):
+            raise LeaseLost("No active lease owned by this scheduler")
+        return row["lease_token"], owner
+
     def _transition(self, jid, status, *, lease_token, owner=None, **fields):
         now = time.time()
         owner = self.worker_id if owner is None else owner
@@ -166,22 +181,24 @@ class Scheduler:
                     or row["lease_expires_at"] <= now):
                 raise LeaseLost("Cannot finish a job without its active lease")
             updates = {"status": status, "updated_at": now, "lease_owner": None,
-                       "lease_token": None, "lease_expires_at": None, "heartbeat_at": None, **fields}
+                       "lease_token": None, "lease_expires_at": None, **fields}
             sql = ", ".join(key + "=?" for key in updates)
             db.execute("UPDATE jobs SET " + sql + " WHERE id=? AND status='running' AND lease_token=?",
                        (*updates.values(), jid, lease_token))
 
-    def finish(self, jid, result, *, lease_token, owner=None):
+    def finish(self, jid, result, *, lease_token=None, owner=None):
         if not isinstance(result, dict):
             raise ValueError("result must be object")
         encoded = json.dumps(result, ensure_ascii=False, allow_nan=False)
-        self._transition(jid, "completed", lease_token=lease_token, owner=owner,
+        token, owner = self._resolve_token(jid, lease_token, owner)
+        self._transition(jid, "completed", lease_token=token, owner=owner,
                          result=encoded, error=None)
 
-    def fail(self, jid, error, *, lease_token, owner=None):
+    def fail(self, jid, error, *, lease_token=None, owner=None):
         if not isinstance(error, str) or not error.strip():
             raise ValueError("error required")
-        self._transition(jid, "failed", lease_token=lease_token, owner=owner, error=error[:500])
+        token, owner = self._resolve_token(jid, lease_token, owner)
+        self._transition(jid, "failed", lease_token=token, owner=owner, error=error[:500])
 
     def retry(self, jid, *, run_at=None):
         scheduled = self._timestamp(run_at, time.time())
