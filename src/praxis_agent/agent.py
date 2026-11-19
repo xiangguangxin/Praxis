@@ -11,6 +11,7 @@ from .locking import checkpoint_lock
 from .planner import TokenBudgetExceeded
 from .diagnostics import error_detail, safe_summary
 from .observations import normalize
+from .validation import validate_action
 from . import tool_trace
 
 APPROVAL_TTL = 600
@@ -58,19 +59,21 @@ def _pause(state, reason):
     _record(state, "paused", reason)
 
 
-def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, trace_tools, policy, approval_id):
+def _prepare_start(path, *, approval, verifier, backend_scope, policy, approval_id):
     state = load(path)
+    if state.get("pending_action") and state["status"] in TERMINAL - {"blocked"}:
+        raise ValueError("Terminal checkpoint contains an unresolved action")
     if state["status"] in TERMINAL:
-        return state
+        return state, False
     if state["status"] == "paused" and state["pending_approval"] and not approval:
-        return state
+        return state, False
     if state.get("pending_action"):
         # A crash may have happened after a non-idempotent action was executed.
         # Never automatically replay it; require operator reconciliation.
         state["status"] = "blocked"
         state["stop_reason"] = "reconciliation_required"
         _record(state, "reconciliation_required", state["pending_action"]["name"])
-        return persist(path, state)
+        return persist(path, state), False
     saved_scope = state.get("backend_scope")
     if saved_scope is not None and backend_scope != saved_scope:
         raise ValueError("Resume requires the original backend settings")
@@ -90,6 +93,46 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
         verifier.prepare(state)
     elif state.get("artifact_baseline") is not None:
         raise ValueError("Resume requires the original artifact verifier")
+    if approval_id is not None and (not approval or approval_id != state.get("pending_approval")):
+        raise ValueError("Approval ID does not match the pending request")
+    return state, True
+
+
+def run_session(path: Path, session_factory, planner, *, approval=False, verifier=None,
+                backend_scope=None, trace_tools=False, policy=None, approval_id=None):
+    """Validate and bind configuration while locked, before launching any backend."""
+    policy = policy or ActionPolicy()
+    options = dict(approval=approval, verifier=verifier, backend_scope=backend_scope,
+                   policy=policy, approval_id=approval_id)
+    with checkpoint_lock(path):
+        state, ready = _prepare_start(path, **options)
+        if not ready:
+            return state
+        persist(path, state)
+        try:
+            with session_factory() as backend:
+                return _run_locked(path, backend, planner, trace_tools=trace_tools, state=state, **options)
+        except KeyboardInterrupt:
+            if not state.get("pending_action") and state["status"] != "completed":
+                _pause(state, "interrupted")
+            persist(path, state)
+            raise
+        except Exception as exc:
+            state["last_error"] = error_detail(exc, "session", bool(state.get("pending_action")))
+            if state["status"] != "completed":
+                state["status"] = "blocked"
+                state["stop_reason"] = "reconciliation_required" if state.get("pending_action") else "retry_required"
+            _record(state, "session_error", state["last_error"]["code"])
+            return persist(path, state)
+
+
+def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, trace_tools, policy, approval_id,
+                state=None):
+    if state is None:
+        state, ready = _prepare_start(path, approval=approval, verifier=verifier, backend_scope=backend_scope,
+                                      policy=policy, approval_id=approval_id)
+        if not ready:
+            return state
     approved = None
     if approval and state["pending_approval"]:
         pending = state.get("pending_review")
@@ -163,6 +206,8 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             action = decision["action"]
             if not isinstance(action.get("name"), str) or not action["name"] or not isinstance(action.get("arguments", {}), dict):
                 raise ValueError("Action requires a name and argument object")
+            phase = "validation"
+            validate_action(action, observation.get("tools"))
             phase = "policy"
             effect, reason = policy.classify(action)
             if effect == "deny":
@@ -217,6 +262,13 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
         except TokenBudgetExceeded:
             _pause(state, "model_budget_exhausted")
             break
+        except KeyboardInterrupt:
+            if state.get("pending_action"):
+                state["status"], state["stop_reason"] = "blocked", "reconciliation_required"
+            else:
+                _pause(state, "interrupted")
+            _record(state, "interrupted", "action outcome unknown" if state.get("pending_action") else phase)
+            raise
         except Exception as exc:
             state["failures"] += 1
             detail = error_detail(exc, phase, bool(state["pending_action"]))

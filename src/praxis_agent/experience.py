@@ -10,6 +10,7 @@ from functools import wraps
 from .locking import checkpoint_lock
 from pathlib import Path
 from .state import load
+from .storage import atomic_json_write
 
 DAY = 86400
 DEFAULT_TTL_DAYS = 90
@@ -49,18 +50,7 @@ class ExperienceStore:
         return data
 
     def _write(self, data):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, name = tempfile.mkstemp(prefix=".experience-", dir=self.path.parent)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                json.dump(data, stream, ensure_ascii=False, indent=2)
-                stream.write("\n")
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(name, self.path)
-        finally:
-            if os.path.exists(name):
-                os.unlink(name)
+        atomic_json_write(self.path, data)
 
     @staticmethod
     def _effective(item, now):

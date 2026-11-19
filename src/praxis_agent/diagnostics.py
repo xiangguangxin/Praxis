@@ -24,7 +24,9 @@ def error_detail(exc, phase, pending=False):
         "Planner must choose act, discover, complete or pause": "invalid_planner_decision",
         "Action requires a name and argument object": "invalid_action",
     }
-    if isinstance(exc, ValueError) and str(exc) in known:
+    if phase == "validation" and isinstance(getattr(exc, "code", None), str):
+        code, message = exc.code, "Tool action rejected before dispatch"
+    elif isinstance(exc, ValueError) and str(exc) in known:
         code, message = known[str(exc)], str(exc)
     elif phase == "planning" and type(getattr(exc, "code", None)) is int:
         code, message = "provider_http_error", f"Model provider returned HTTP {exc.code}"

@@ -115,6 +115,9 @@ The local file verifier supports safe root-constrained paths, minimum size, cont
 
 ## Review and recovery
 
+Advertised tool schemas are validated locally before dispatch; unknown tools or
+invalid arguments never reach the backend. Remote schema references are not fetched.
+
 Sensitive tool names, control targets and executable payloads trigger review even
 when a planner labels them low impact. `praxis status` exposes a redacted
 `pending_review` with its exact fingerprint and expiry. Review the actual target
@@ -127,7 +130,8 @@ and `deny` effects. See [policy example](examples/action-policy.json) and
 [approval and recovery details](RUNTIME.md#reviewable-approval-and-action-policy).
 Policies aid authorization; they are not a security sandbox and cannot infer all
 UI effects. `praxis retry` reopens known-outcome failures; uncertain in-flight
-actions still require `praxis reconcile`.
+actions still require `praxis reconcile`. Ctrl+C persists a paused or blocked state;
+backend bindings are checked before a new session starts.
 
 ## Experience memory
 

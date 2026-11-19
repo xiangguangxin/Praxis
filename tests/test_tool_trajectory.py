@@ -68,10 +68,12 @@ class ToolTrajectoryTests(unittest.TestCase):
 
     def test_trace_contains_only_known_names_and_host_outcomes(self):
         class Desktop:
+            calls = 0
             def observe(self):
                 return {"tools": [{"name": "visible_tool"}]}
 
             def act(self, action):
+                self.calls += 1
                 return {"ok": True, "content": ["private-content"]}
 
         class Planner:
@@ -85,13 +87,17 @@ class ToolTrajectoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             checkpoint = Path(folder) / "state.json"
             create(checkpoint, "Test a tool", ["result"])
-            run(checkpoint, Desktop(), Planner(), trace_tools=True)
+            backend = Desktop()
+            state = run(checkpoint, backend, Planner(), trace_tools=True)
             trace = load(checkpoint)["tool_trace"]
+            self.assertEqual(backend.calls, 1)
+            self.assertEqual(state["last_error"]["code"], "unknown_or_ambiguous_tool")
+            self.assertIsNone(state["pending_action"])
 
-        self.assertEqual([event["tool"] for event in trace["events"]], ["visible_tool", None])
+        self.assertEqual([event["tool"] for event in trace["events"]], ["visible_tool"])
         self.assertGreaterEqual(trace["events"][0]["duration_ms"], 0)
         self.assertNotIn("private", json.dumps(trace))
-        self.assertEqual(tool_trace.evaluate({"tools": ["visible_tool"]}, trace)["reasons"], ["incomplete_trace"])
+        self.assertTrue(tool_trace.evaluate({"tools": ["visible_tool"]}, trace)["passed"])
 
     def test_run_manifest_pins_suite_inputs_and_runtime(self):
         base = manifest([{"name": "a", "rules": {"first": {}, "second": {}}}], 1)

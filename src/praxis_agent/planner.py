@@ -136,6 +136,11 @@ class ModelPlanner:
                         "data:" + item["mimeType"] + ";base64," + item["data"]}})
             elif item.get("type") == "text":
                 evidence_parts.append({"type": "text", "text": str(item.get("text", ""))[:self.max_text_chars]})
+        # Fresh UI evidence has priority; include bounded text from the last action
+        # separately so automatic observation does not erase diagnostic tool output.
+        for item in observation.get("tool_result_content", [])[:2]:
+            if isinstance(item, dict) and item.get("type") == "text":
+                evidence_parts.append({"type": "text", "text": "Previous tool result (historical): " + str(item.get("text", ""))[:self.max_text_chars]})
         # Keep only latest bounded tool results; do not persist screenshots.
         evidence_parts = evidence_parts[:4]
         messages = [

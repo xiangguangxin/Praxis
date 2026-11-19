@@ -15,7 +15,7 @@ Restart with the same checkpoint to resume. A crash during an in-flight action b
 
 ## Phase 3: recover safely
 
-Version 2 checkpoints migrate version 1 on write. A process-level lock prevents concurrent runs on the same checkpoint. If a process dies after dispatching a potentially non-idempotent action, the next run becomes blocked. Inspect the desktop and reconcile manually:
+Version 2 checkpoints migrate version 1 on write. A process-level lock prevents concurrent runs on the same checkpoint. If a process dies after dispatching a potentially non-idempotent action, the next run becomes blocked. A terminated process may leave a running checkpoint with a pending action; after independently checking the target, reconcile it directly (the checkpoint lock must be available):
 
 ```sh
 praxis reconcile ./goal-state.json --outcome executed --note "Checked the UI and confirmed the action happened"
@@ -107,7 +107,7 @@ praxis run ./goal-state.json --nova /absolute/path/to/nova \
 
 `--max-model-calls` and `--max-model-tokens` are optional (0 means no limit). If a budget is reached, the agent **pauses** instead of retrying indefinitely. Model usage is saved in checkpoint `model_usage` and carries over to `resume`. When the provider reports `usage.prompt_tokens` and `usage.completion_tokens`, those are tracked as actual usage. If it omits usage, input is roughly estimated by character count, tracked separately, and output tokens are unknown. Token budgets are best-effort guards, not strict billing caps: a single request can overshoot a remaining budget, images have provider-specific costs, and requests that fail before returning usage may be unaccounted for. The model endpoint may bill for attempted requests.
 
-The compact tool list currently includes the first 12 advertised MCP tools, so check tool ordering and availability before relying on less common Nova tools. For accurate before/after savings, compare `model_usage` across equivalent runs with the same model, UI, and goal. Real Nova Windows/macOS E2E testing is still outstanding.
+The planner receives a paged tool directory and selected complete schemas; use internal discovery to load tools beyond the current page. For accurate before/after savings, compare `model_usage` across equivalent runs with the same model, UI, and goal. Real Nova Windows/macOS E2E testing is still outstanding.
 
 ## Agent Benchmark
 
@@ -264,7 +264,7 @@ configured model budget. File-verifier identity binds even without freshness rul
 
 Execution commands (`run`, `resume`, `demo`) use exit codes 0 completed, 3 paused,
 4 blocked, 5 failed. Invalid CLI/configuration uses 2. `verify` uses 0/1 for
-pass/fail; `doctor` uses 0/1 for healthy/unhealthy. `status`, `retry` and `reconcile`
+pass/fail; `doctor` uses 0/1 for healthy/unhealthy. Ctrl+C exits with 130 after persisting interruption state. `status`, `retry` and `reconcile`
 report their operation's result without treating a paused checkpoint as a CLI error.
 
 `last_error` records a stable code, phase, possible action dispatch and recovery
@@ -320,3 +320,55 @@ between concurrent local writers; this does not provide distributed locking.
 
 For readiness checks, complete examples, CI artifacts and separately labelled
 real-provider acceptance, see [the acceptance guide](docs/ACCEPTANCE.md).
+
+
+## Dispatch contracts and process interruption
+
+Tool actions are validated against the complete advertised JSON Schema before
+approval evaluation, tracing and write-ahead dispatch. Unknown or duplicate tool
+names, missing/extra arguments, invalid types/enums and unsupported/unresolvable
+schemas never reach the backend. Schema references resolve locally only; remote
+`$ref` resources are not fetched. `jsonschema` is now a runtime dependency.
+Format annotations without assertion semantics are not an additional authorization
+or sandbox boundary. Custom dictionary adapters that omit a `tools` directory
+retain the legacy contract and have no advertised schema to check.
+
+Rejected actions produce a payload-free validation error. The planner can correct
+the action without spending an action step. Three consecutive invalid decisions
+block for operator diagnosis. Operator policy equality preserves JSON types:
+`true` does not match `1`, and the policy copies supplied rules on construction.
+
+The CLI uses `run_session()` to hold the checkpoint lock and validate backend,
+policy, verifier and approval bindings **before** launching Nova or opening a
+browser. Terminal, pending-approval and uncertain-action checkpoints do not start
+a new session merely to return their status. Startup errors are recorded as
+known-outcome session errors. Library callers with an already-open adapter can
+continue using `run()`.
+
+Ctrl+C before dispatch pauses the goal. During a dispatched call it immediately
+records `blocked` plus the uncertain pending action. No interrupted action is
+replayed automatically. Hard termination may leave `running` on disk; `reconcile`
+accepts that state when there is a pending action and it can acquire the lock.
+It refuses reconciliation while another cooperating executor holds the lock.
+
+## Durable publication and transient evidence
+
+Checkpoint creation publishes a temporary file without replacing an existing
+path, including a file created concurrently after the initial existence check.
+Checkpoint and experience writes reject NaN/Infinity, flush and fsync the file,
+and atomically publish it. On POSIX, parent directory entries are fsynced as well;
+Windows uses atomic publication and file fsync without a directory-fsync claim.
+Actual power-loss guarantees still depend on the filesystem and operating system.
+
+Nova manual observation results are now part of the next normalized observation,
+so their content contributes to approval/no-progress view identities. An empty
+result after another action clears the previous screenshot. Automatic fresh
+observations keep bounded previous-action text separately; old result images do
+not replace a fresh screenshot. These payloads remain transient. EOF wakes a
+pending MCP request immediately, and cleanup is safe after a child exits.
+
+Browser resume still creates an isolated context: it does not restore cookies,
+form fields or a previously open tab. The checkpoint records execution progress,
+not a full browser-session snapshot. Reobserve and verify the application state
+on resume; nontrivial stateful browser recovery and native Nova acceptance need
+separate real-backend validation.

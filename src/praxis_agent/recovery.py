@@ -12,8 +12,8 @@ def reconcile(path: Path, *, outcome: str, note: str) -> dict:
         raise ValueError("A human reconciliation note is required")
     with checkpoint_lock(path):
         state = load(path)
-        if state["status"] != "blocked" or not state.get("pending_action"):
-            raise ValueError("Only blocked in-flight actions may be reconciled")
+        if state["status"] not in {"blocked", "running"} or not state.get("pending_action"):
+            raise ValueError("Only inactive running/blocked in-flight actions may be reconciled")
         # Even when the action was not executed, never replay the old command:
         # re-observe and ask the planner to choose a fresh action.
         action_name = state["pending_action"]["name"]

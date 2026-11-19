@@ -6,7 +6,7 @@ class NovaMCP:
     def __init__(self, executable: str):
         self.process = subprocess.Popen([executable], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        self.responses: queue.Queue[dict[str, Any]] = queue.Queue()
+        self.responses: queue.Queue[dict[str, Any] | None] = queue.Queue()
         self.next_id = 0
         self._reader = threading.Thread(target=self._read, daemon=True)
         self._reader.start()
@@ -33,18 +33,22 @@ class NovaMCP:
             if not cursor:
                 break
             if cursor in seen or len(seen) >= 100:
-                self.close()
                 raise ValueError("Invalid MCP tool pagination")
             seen.add(cursor)
         self.names = {tool["name"] for tool in self.tools}
 
     def _read(self):
         assert self.process.stdout is not None
-        for line in self.process.stdout:
-            try:
-                self.responses.put(json.loads(line))
-            except (ValueError, UnicodeDecodeError):
-                continue
+        try:
+            for line in self.process.stdout:
+                try:
+                    self.responses.put(json.loads(line))
+                except (ValueError, UnicodeDecodeError):
+                    continue
+        except (OSError, ValueError):
+            pass
+        finally:
+            self.responses.put(None)  # Wake a pending RPC immediately on EOF.
 
     def _notify(self, method, params):
         assert self.process.stdin is not None
@@ -67,13 +71,18 @@ class NovaMCP:
                 response = self.responses.get(timeout=max(0.01, deadline - time.monotonic()))
             except queue.Empty as exc:
                 raise TimeoutError(f"MCP timeout: {method}") from exc
+            if response is None:
+                raise RuntimeError("MCP stream closed before responding")
             if time.monotonic() > deadline:
                 raise TimeoutError(f"MCP timeout: {method}")
             if not isinstance(response, dict) or response.get("id") != ident:
                 continue
             if "error" in response:
-                raise RuntimeError(str(response["error"]))
-            return response.get("result", {})
+                raise RuntimeError("MCP server returned an error")
+            result = response.get("result")
+            if not isinstance(result, dict):
+                raise ValueError("Invalid MCP result object")
+            return result
 
     def call(self, name, arguments):
         if name not in self.names:
@@ -107,11 +116,18 @@ class NovaMCP:
                 "content": result.get("content", [])}
 
     def close(self):
-        self.process.terminate()
-        try:
-            self.process.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            self.process.kill()
-            self.process.wait(timeout=3)
-
-
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=3)
+        for stream in (self.process.stdin, self.process.stdout):
+            if stream is not None:
+                stream.close()
+        if self._reader is not threading.current_thread():
+            self._reader.join(timeout=1)

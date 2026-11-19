@@ -3,7 +3,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .agent import run
+from .agent import run_session
 from .model_connection import add_model_arguments, resolve_model_connection
 from .recovery import reconcile, retry
 from .session import browser_scope, open_session
@@ -92,6 +92,10 @@ def main():
             result = FileVerifier.from_json(args.verifier).evaluate(load(args.checkpoint))
         else:
             result = _execute(args)
+    except KeyboardInterrupt:
+        # The runtime has already persisted a paused/blocked state. Avoid a traceback.
+        print(json.dumps({"interrupted": True, "checkpoint": str(getattr(args, "checkpoint", ""))}))
+        raise SystemExit(130)
     except (OSError, ValueError, RuntimeError) as exc:
         parser.error(str(exc))
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -130,11 +134,11 @@ def _execute(args):
     scope = (browser_scope(args.browser_url, download_dir) if args.browser_url else
              fingerprint({"nova": str(Path(args.nova).resolve())}))
     policy = ActionPolicy.from_json(args.policy) if args.policy else ActionPolicy()
-    with open_session(planner, nova=args.nova, browser_url=args.browser_url,
-                      download_dir=download_dir, browser_executable=args.browser_executable) as backend:
-        return run(args.checkpoint, backend, planner, approval=args.approve_pending,
-                   verifier=verifier, backend_scope=scope, trace_tools=args.trace_tools,
-                   policy=policy, approval_id=args.approval_id)
+    factory = lambda: open_session(planner, nova=args.nova, browser_url=args.browser_url,
+                                   download_dir=download_dir, browser_executable=args.browser_executable)
+    return run_session(args.checkpoint, factory, planner, approval=args.approve_pending,
+                       verifier=verifier, backend_scope=scope, trace_tools=args.trace_tools,
+                       policy=policy, approval_id=args.approval_id)
 
 
 if __name__ == "__main__":

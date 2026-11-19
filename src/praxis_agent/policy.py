@@ -17,7 +17,7 @@ _SAFE_TARGETS = {"role", "name", "label", "filename", "url"}
 
 
 def fingerprint(action):
-    return hashlib.sha256(json.dumps(action, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(action, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()).hexdigest()
 
 
 def _sensitive(value):
@@ -48,7 +48,7 @@ class ActionPolicy:
     authorize another target or an additional command argument.
     """
     def __init__(self, rules=()):
-        self.rules = list(rules)
+        self.rules = json.loads(json.dumps(list(rules), allow_nan=False))
         for rule in self.rules:
             if (not isinstance(rule, dict) or set(rule) != {"tool", "arguments", "effect"}
                     or not isinstance(rule["tool"], str) or not rule["tool"]
@@ -66,7 +66,7 @@ class ActionPolicy:
 
     def classify(self, action):
         name, args = action.get("name", ""), action.get("arguments", {})
-        matches = [rule for rule in self.rules if rule["tool"] == name and rule["arguments"] == args]
+        matches = [rule for rule in self.rules if rule["tool"] == name and fingerprint(rule["arguments"]) == fingerprint(args)]
         # Denial always wins, even over an exact allow rule or an existing approval.
         for effect in ("deny", "approve", "allow"):
             if any(rule["effect"] == effect for rule in matches):
