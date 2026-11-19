@@ -17,23 +17,28 @@ class TaskGraph:
 
     def __init__(self, tasks, status=None):
         tasks = list(tasks)
-        self.tasks = {t.id: t for t in tasks}
-        if not tasks or len(self.tasks) != len(tasks):
+        if not tasks or any(not isinstance(task, Task) for task in tasks):
+            raise TaskGraphError("Tasks must be nonempty Task objects")
+        if any(not isinstance(task.id, str) or not task.id.strip() for task in tasks):
+            raise TaskGraphError("Task IDs must be nonempty strings")
+        self.tasks = {task.id: task for task in tasks}
+        if len(self.tasks) != len(tasks):
             raise TaskGraphError("Tasks must have unique IDs")
         for task in tasks:
             if (not isinstance(task, Task) or not isinstance(task.id, str) or not task.id.strip()
                     or len(task.id) > 80 or not isinstance(task.goal, str) or not task.goal.strip()
                     or len(task.goal) > 1000):
                 raise TaskGraphError("Task ID and goal required")
-            if (not isinstance(task.dependencies, tuple) or len(set(task.dependencies)) != len(task.dependencies)
-                    or any(not isinstance(d, str) or d not in self.tasks or d == task.id for d in task.dependencies)):
+            if (not isinstance(task.dependencies, tuple)
+                    or any(not isinstance(d, str) or d not in self.tasks or d == task.id for d in task.dependencies)
+                    or len(set(task.dependencies)) != len(task.dependencies)):
                 raise TaskGraphError("Invalid dependencies")
             if (not isinstance(task.acceptance, tuple) or len(task.acceptance) > 10
                     or any(not isinstance(c, str) or not c.strip() or len(c) > 300 for c in task.acceptance)):
                 raise TaskGraphError("Invalid task acceptance criteria")
             if (not isinstance(task.resources, tuple) or len(task.resources) > 16
-                    or len(set(task.resources)) != len(task.resources)
-                    or any(not isinstance(r, str) or not r.strip() or len(r) > 128 for r in task.resources)):
+                    or any(not isinstance(r, str) or not r.strip() or len(r) > 128 for r in task.resources)
+                    or len(set(task.resources)) != len(task.resources)):
                 raise TaskGraphError("Task resources must be unique nonempty strings of at most 128 characters")
         self._validate_acyclic()
         self.status = dict(status) if status is not None else {name: "pending" for name in self.tasks}

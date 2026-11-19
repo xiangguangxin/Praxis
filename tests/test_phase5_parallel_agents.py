@@ -90,4 +90,8 @@ class ParallelTaskTests(unittest.TestCase):
         self.assertEqual(restored.tasks["a"].resources,("desktop:fixture","output:/tmp"))
         with self.assertRaises(TaskGraphError):
             TaskGraph([Task("a","A",(),(),("same","same"))])
+        with self.assertRaises(TaskGraphError):
+            TaskGraph([Task("bad","Bad",(),(),([],))])
+        with self.assertRaises(TaskGraphError):
+            TaskGraph([Task("bad","Bad",([ "missing" ],))])
 
