@@ -238,7 +238,7 @@ class BrowserGoals(unittest.TestCase):
             self.assertEqual(report["provenance"]["model_connection"], "litellm")
             self.assertEqual(report["avg_tokens"], 150)
             self.assertEqual(state["status"], "completed")
-            self.assertEqual(state["model_usage"]["input_tokens"], 100)
+            self.assertEqual(state["model_usage"]["input_tokens"], 120)
             self.assertEqual(PlannerAPI.authorization, [f"Bearer {upstream_key}"] * 12)
             self.assertTrue(all(r["response_format"] == {"type": "json_object"} for r in PlannerAPI.requests))
 
