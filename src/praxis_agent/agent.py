@@ -7,6 +7,7 @@ from .state import load, persist, _record, TERMINAL
 from .policy import needs_approval, fingerprint
 from .verifier import EvidenceOnlyVerifier
 from .verification import FileVerifier
+from .verifiers.registry import CriteriaVerifier
 from .locking import checkpoint_lock
 from .planner import TokenBudgetExceeded
 from . import tool_trace
@@ -41,6 +42,8 @@ def _run_locked(path: Path, desktop, planner, *, approval: bool, verifier,
         state["backend_scope"] = backend_scope
     if isinstance(verifier, FileVerifier):
         verifier.prepare(state)
+    elif isinstance(verifier, CriteriaVerifier):
+        verifier.prepare(state)
     elif state.get("artifact_baseline") is not None:
         raise ValueError("Resume requires the original artifact verifier")
 
@@ -71,7 +74,7 @@ def _run_locked(path: Path, desktop, planner, *, approval: bool, verifier,
                 raise TypeError("Planner decision must be a dict")
             kind = decision.get("type")
             if kind == "complete":
-                if isinstance(verifier, FileVerifier):
+                if isinstance(verifier, (FileVerifier, CriteriaVerifier)):
                     state["artifact_verification"] = verifier.evaluate(state)
                     accepted = state["artifact_verification"]["passed"]
                     if not accepted:

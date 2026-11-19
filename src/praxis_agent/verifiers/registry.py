@@ -31,3 +31,18 @@ class VerificationRegistry:
             except Exception as exc:
                 checks[name] = {"passed": False, "status": "error", "error": type(exc).__name__}
         return {"passed": all(c["passed"] for c in checks.values()), "checks": checks}
+
+class CriteriaVerifier:
+    """Opt-in independent verification for the existing agent completion gate."""
+    def __init__(self, registry, rules):
+        if not isinstance(registry, VerificationRegistry) or not isinstance(rules, dict) or not rules:
+            raise VerificationError("Registry and nonempty rules required")
+        self.registry, self.rules = registry, rules
+
+    def prepare(self, state):
+        if set(state["criteria"]) != set(self.rules):
+            raise VerificationError("All checkpoint criteria require rules")
+
+    def evaluate(self, state):
+        self.prepare(state)
+        return self.registry.evaluate(self.rules)
