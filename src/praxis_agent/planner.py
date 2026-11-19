@@ -150,9 +150,9 @@ class ModelPlanner:
 
     def _request(self,messages,*,vision=False,risk="low",max_tokens=None,task_type="general"):
         model,key,endpoint,route=self._route(vision,risk,task_type)
-        routes=self.usage.setdefault("route_counts",{})
-        routes[task_type]=routes.get(task_type,0)+1
-        self.usage["last_route"]=route
+        for label in ("task_" + task_type, "profile_" + route):
+            key = "route_" + label + "_calls"
+            self.usage[key] = self.usage.get(key, 0) + 1
         payload={"model":model,"messages":messages,"temperature":0,"response_format":{"type":"json_object"}}
         if max_tokens: payload["max_tokens"]=max_tokens
         request=urllib.request.Request(endpoint,data=json.dumps(payload).encode(),
