@@ -10,6 +10,7 @@ class Task:
     goal: str
     dependencies: tuple[str, ...] = ()
     acceptance: tuple[str, ...] = ()
+    resources: tuple[str, ...] = ()
 
 class TaskGraph:
     STATUSES = {"pending", "running", "completed", "failed", "blocked"}
@@ -30,6 +31,10 @@ class TaskGraph:
             if (not isinstance(task.acceptance, tuple) or len(task.acceptance) > 10
                     or any(not isinstance(c, str) or not c.strip() or len(c) > 300 for c in task.acceptance)):
                 raise TaskGraphError("Invalid task acceptance criteria")
+            if (not isinstance(task.resources, tuple) or len(task.resources) > 16
+                    or len(set(task.resources)) != len(task.resources)
+                    or any(not isinstance(r, str) or not r.strip() or len(r) > 128 for r in task.resources)):
+                raise TaskGraphError("Task resources must be unique nonempty strings of at most 128 characters")
         self._validate_acyclic()
         self.status = dict(status) if status is not None else {name: "pending" for name in self.tasks}
         if set(self.status) != set(self.tasks) or any(s not in self.STATUSES for s in self.status.values()):
@@ -74,7 +79,7 @@ class TaskGraph:
         if self.status.get(name) != "pending" or not isinstance(goal, str) or not goal.strip():
             raise TaskGraphError("Only pending tasks can be replanned")
         task = self.tasks[name]
-        self.tasks[name] = Task(name, goal, task.dependencies, task.acceptance)
+        self.tasks[name] = Task(name, goal, task.dependencies, task.acceptance, task.resources)
 
     def add_task(self, task):
         if not isinstance(task, Task) or task.id in self.tasks:
@@ -113,7 +118,7 @@ class TaskGraph:
     def to_dict(self):
         return {"version": 1,
                 "tasks": [{"id": t.id, "goal": t.goal, "dependencies": list(t.dependencies),
-                           "acceptance": list(t.acceptance)} for t in self.tasks.values()],
+                           "acceptance": list(t.acceptance), "resources": list(t.resources)} for t in self.tasks.values()],
                 "status": dict(self.status)}
 
     @classmethod
@@ -123,10 +128,10 @@ class TaskGraph:
         try:
             tasks = []
             for item in data["tasks"]:
-                if not isinstance(item, dict) or set(item) - {"id", "goal", "dependencies", "acceptance"}:
+                if not isinstance(item, dict) or set(item) - {"id", "goal", "dependencies", "acceptance", "resources"}:
                     raise TaskGraphError("Invalid task fields")
                 tasks.append(Task(item["id"], item["goal"], tuple(item.get("dependencies", [])),
-                                  tuple(item.get("acceptance", []))))
+                                  tuple(item.get("acceptance", [])), tuple(item.get("resources", []))))
             return cls(tasks, data.get("status"))
         except (TypeError, KeyError) as exc:
             raise TaskGraphError("Invalid graph data") from exc

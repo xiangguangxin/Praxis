@@ -24,15 +24,18 @@ class DynamicTaskPlanner:
         tasks = []
         try:
             for item in raw:
-                if not isinstance(item, dict) or set(item) - {"id", "goal", "dependencies", "acceptance"}:
+                if not isinstance(item, dict) or set(item) - {"id", "goal", "dependencies", "acceptance", "resources"}:
                     raise PlanError("Unexpected task fields")
                 deps, acceptance = item.get("dependencies", []), item.get("acceptance", [])
+                resources = item.get("resources", [])
                 if not isinstance(deps, list) or not all(isinstance(d, str) for d in deps):
                     raise PlanError("Invalid dependencies")
                 if (not isinstance(acceptance, list) or len(acceptance) > 10
                         or not all(isinstance(c, str) and c.strip() for c in acceptance)):
                     raise PlanError("Invalid acceptance criteria")
-                tasks.append(Task(item["id"], item["goal"], tuple(deps), tuple(acceptance)))
+                if not isinstance(resources, list) or not all(isinstance(r, str) and r.strip() for r in resources):
+                    raise PlanError("Invalid resource locks")
+                tasks.append(Task(item["id"], item["goal"], tuple(deps), tuple(acceptance), tuple(resources)))
             completed = list(completed)
             completed_ids = {item.id for item in completed}
             if any(task.id in completed_ids for task in tasks):
