@@ -12,6 +12,10 @@ def analyze_failure(state: dict) -> dict | None:
     checks = task.get("checks")
     if not isinstance(checks, dict):
         checks = (state.get("artifact_verification") or {}).get("checks", {})
+    if (result.get("ok") is True and not state.get("pending_action")
+            and code not in ("task_acceptance_failed", "policy_denied")
+            and error.get("may_have_executed") is not True):
+        return None
     failed_checks = sorted(
         str(name)[:100] + ":" + str(item.get("status", "unknown"))[:40]
         for name, item in checks.items()
