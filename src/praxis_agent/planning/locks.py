@@ -1,9 +1,18 @@
 """Cross-process locks for named external resources used by independent tasks."""
 import hashlib
 import time
+from threading import Lock
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from ..locking import checkpoint_lock
+
+_LOCAL_GUARD = Lock()
+_LOCAL_LOCKS = {}
+
+
+def _local_lock(key):
+    with _LOCAL_GUARD:
+        return _LOCAL_LOCKS.setdefault(key, Lock())
 
 class ResourceLockTimeout(TimeoutError):
     pass
@@ -26,6 +35,11 @@ class TaskLockManager:
         with ExitStack() as stack:
             for name in names:
                 digest = hashlib.sha256(name.encode("utf-8")).hexdigest()
+                local = _local_lock(str(self.directory.resolve()) + ":" + digest)
+                remaining = max(0, deadline-time.monotonic())
+                if not local.acquire(timeout=remaining):
+                    raise ResourceLockTimeout("Timed out waiting for a task resource lock")
+                stack.callback(local.release)
                 path = self.directory / (digest + ".resource")
                 while True:
                     try:
