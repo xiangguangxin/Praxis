@@ -12,6 +12,7 @@ class ModelProfile:
     api_key_env: str
     capabilities: frozenset[str]
     max_cost_tier: int = 1
+    task_types: frozenset[str] = frozenset()
 
     def __post_init__(self):
         p=urlsplit(self.endpoint)
@@ -19,6 +20,9 @@ class ModelProfile:
         if p.scheme not in {"http","https"} or not p.hostname or p.username or p.password or p.query or p.fragment: raise ValueError("Invalid model endpoint")
         if not self.capabilities or not self.capabilities <= {"chat","vision","json"}: raise ValueError("Invalid model capabilities")
         if type(self.max_cost_tier) is not int or not 1 <= self.max_cost_tier <= 5: raise ValueError("Invalid cost tier")
+        allowed_tasks = {"planning","execution","visual_inspection","verification","debugging","code","research","general"}
+        if not isinstance(self.task_types, frozenset) or not self.task_types <= allowed_tasks:
+            raise ValueError("Invalid task type specialization")
 
 class ModelRouter:
     def __init__(self, profiles, default):
@@ -32,8 +36,8 @@ class ModelRouter:
         if not isinstance(data,dict) or set(data)!={"default","profiles"} or not isinstance(data["profiles"],list): raise ValueError("Invalid model profile configuration")
         profiles=[]
         for item in data["profiles"]:
-            if not isinstance(item,dict) or set(item)-{"name","model","endpoint","api_key_env","capabilities","max_cost_tier"}: raise ValueError("Invalid profile fields")
-            profiles.append(ModelProfile(item["name"],item["model"],item["endpoint"],item["api_key_env"],frozenset(item["capabilities"]),item.get("max_cost_tier",1)))
+            if not isinstance(item,dict) or set(item)-{"name","model","endpoint","api_key_env","capabilities","max_cost_tier","task_types"}: raise ValueError("Invalid profile fields")
+            profiles.append(ModelProfile(item["name"],item["model"],item["endpoint"],item["api_key_env"],frozenset(item["capabilities"]),item.get("max_cost_tier",1),frozenset(item.get("task_types",[]))))
         return cls(profiles,data["default"])
     def select(self, *, task_type="general", requires_vision=False, risk="low", preferred=None):
         if risk not in {"low","medium","high"}: raise ValueError("Invalid risk")
@@ -44,7 +48,12 @@ class ModelRouter:
             if p not in candidates: raise ValueError("Preferred profile lacks required capabilities")
             return p
         if not candidates: raise LookupError("No compatible model profile")
+        if task_type not in {"planning","execution","visual_inspection","verification","debugging","code","research","general"}:
+            raise ValueError("Invalid task type")
+        specialized=[p for p in candidates if task_type in p.task_types]
+        generic=[p for p in candidates if not p.task_types]
+        candidates=specialized or generic or candidates
         candidates.sort(key=lambda p: ((-p.max_cost_tier if risk=="high" else p.max_cost_tier),p.name))
         return candidates[0]
     def describe(self):
-        return [{"name":p.name,"model":p.model,"capabilities":sorted(p.capabilities),"max_cost_tier":p.max_cost_tier} for p in self.profiles.values()]
+        return [{"name":p.name,"model":p.model,"capabilities":sorted(p.capabilities),"max_cost_tier":p.max_cost_tier,"task_types":sorted(p.task_types)} for p in self.profiles.values()]
