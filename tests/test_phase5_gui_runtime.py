@@ -34,6 +34,34 @@ class TaskPlanRuntimeTests(unittest.TestCase):
         self.assertEqual(restored.active().id,"a")
         self.assertEqual(restored.attempts["a"],1)
 
+    def test_replan_preserves_completed_nodes_and_replaces_unfinished_nodes(self):
+        graph=TaskGraph([Task("build","Build",(),("build output exists",)),
+                         Task("report","Report",("build",),("report exists",))])
+        runtime=TaskPlanRuntime(graph.to_dict(),["build output exists","report exists"],max_attempts=1)
+        runtime.active()
+        runtime.complete("build",{"passed":True})
+        runtime.active()
+        runtime.reject("report",{"passed":False})
+        replacement=TaskGraph([Task("build","Build",(),("build output exists",)),
+                               Task("new-report","Revised report",("build",),("report exists",))],
+                              {"build":"completed","new-report":"pending"})
+        runtime.replace_remaining(replacement.to_dict())
+        self.assertEqual(runtime.graph.status,{"build":"completed","new-report":"pending"})
+        self.assertNotIn("report",runtime.graph.tasks)
+        self.assertEqual(runtime.results["build"],{"passed":True})
+
+    def test_invalid_replan_does_not_mutate_existing_graph(self):
+        graph=TaskGraph([Task("build","Build",(),("build output exists",)),
+                         Task("report","Report",("build",),("report exists",))])
+        runtime=TaskPlanRuntime(graph.to_dict(),["build output exists","report exists"])
+        before=runtime.to_dict()
+        invalid=TaskGraph([Task("build","Build",(),("build output exists",)),
+                           Task("new-report","Revised report",("build",),("not a goal criterion",))],
+                          {"build":"completed","new-report":"pending"})
+        with self.assertRaises(TaskRuntimeError):
+            runtime.replace_remaining(invalid.to_dict())
+        self.assertEqual(runtime.to_dict(),before)
+
 class AgentTaskIntegrationTests(unittest.TestCase):
     def _verifier(self, callback):
         registry=VerificationRegistry()
@@ -64,6 +92,40 @@ class AgentTaskIntegrationTests(unittest.TestCase):
             self.assertEqual(result["task_runtime"]["graph"]["status"],{"build":"completed","report":"completed"})
             self.assertEqual([x["event"] for x in result["history"] if x["event"]=="task_completed"],
                              ["task_completed","task_completed"])
+
+    def test_failed_task_triggers_bounded_replan_of_unfinished_dag(self):
+        checks={"count":0}
+        verifier=self._verifier(lambda params:{"passed":True,"evidence":{"source":"fixture"}})
+        class Desktop:
+            def observe(self): return {"summary":"fixture ready"}
+        class Planner:
+            usage={}
+            def __init__(self): self.replans=0
+            def prepare_plan(self,state,observation):
+                return TaskGraph([Task("build","Build",(),("build output exists",)),
+                                  Task("report","Report",("build",),("report exists",))]).to_dict()
+            def replan_tasks(self,state,observation):
+                self.replans+=1
+                return TaskGraph([Task("rebuild","Revised build",(),("build output exists",)),
+                                  Task("new-report","Revised report",("rebuild",),("report exists",))]).to_dict()
+            def decide(self,state,observation):
+                if state.get("active_task"): return {"type":"task_complete","evidence":{}}
+                return {"type":"complete","evidence":{}}
+        planner=Planner()
+        # First task acceptance fails; revised DAG then verifies both tasks.
+        def check(params):
+            checks["count"]+=1
+            return {"passed":checks["count"]>1,"evidence":{"attempt":checks["count"]}}
+        verifier=self._verifier(check)
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/"goal.json"
+            create(path,"Build and report",["build output exists","report exists"])
+            result=run(path,Desktop(),planner,verifier=verifier)
+            self.assertEqual(result["status"],"completed")
+            self.assertEqual(planner.replans,1)
+            self.assertEqual(result["task_plan_replans"],1)
+            self.assertEqual(result["task_runtime"]["graph"]["status"],
+                             {"rebuild":"completed","new-report":"completed"})
 
     def test_failed_task_check_retries_without_unlocking_dependent(self):
         checks={"count":0}
