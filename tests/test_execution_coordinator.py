@@ -52,7 +52,7 @@ class ExecutionCoordinatorTests(unittest.TestCase):
         state["scheduled_job_id"] = queued["id"]
         persist(path, state)
         adopted = self.coordinator.open_checkpoint(claimed)
-        self.assertEqual(adopted, path)
+        self.assertEqual(adopted.resolve(), path.resolve())
         self.assertEqual(self.scheduler.get(queued["id"])["checkpoint_id"], state["id"])
 
     def test_missing_bound_checkpoint_fails_closed(self):
