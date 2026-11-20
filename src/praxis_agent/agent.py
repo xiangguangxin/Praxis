@@ -16,6 +16,7 @@ from .validation import validate_action
 from . import tool_trace
 from .planning import TaskPlanRuntime, TaskRuntimeError
 from .failure_analysis import analyze_failure
+from .scheduler import LeaseLost
 
 APPROVAL_TTL = 600
 
@@ -140,7 +141,8 @@ def _prepare_start(path, *, approval, verifier, backend_scope, policy, approval_
 
 
 def run_session(path: Path, session_factory, planner, *, approval=False, verifier=None,
-                backend_scope=None, trace_tools=False, policy=None, approval_id=None):
+                backend_scope=None, trace_tools=False, policy=None, approval_id=None,
+                execution_guard=None):
     """Validate and bind configuration while locked, before launching any backend."""
     policy = policy or ActionPolicy()
     options = dict(approval=approval, verifier=verifier, backend_scope=backend_scope,
@@ -152,7 +154,7 @@ def run_session(path: Path, session_factory, planner, *, approval=False, verifie
         persist(path, state)
         try:
             with session_factory() as backend:
-                return _run_locked(path, backend, planner, trace_tools=trace_tools, state=state, **options)
+                return _run_locked(path, backend, planner, trace_tools=trace_tools, state=state,\n                                   execution_guard=execution_guard, **options)
         except KeyboardInterrupt:
             if not state.get("pending_action") and state["status"] != "completed":
                 _pause(state, "interrupted")
@@ -168,7 +170,7 @@ def run_session(path: Path, session_factory, planner, *, approval=False, verifie
 
 
 def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, trace_tools, policy, approval_id,
-                state=None):
+                state=None, execution_guard=None):
     if state is None:
         state, ready = _prepare_start(path, approval=approval, verifier=verifier, backend_scope=backend_scope,
                                       policy=policy, approval_id=approval_id)
@@ -195,6 +197,8 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
     while True:
         phase = "observation"
         try:
+            if execution_guard is not None:
+                execution_guard.raise_if_lost()
             observation = normalize(desktop.observe())
             failure_analysis = analyze_failure(state)
             if failure_analysis is not None:
@@ -387,6 +391,8 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             persist(path, state)
             started = time.monotonic()
             phase = "action"
+            if execution_guard is not None:
+                execution_guard.raise_if_lost()
             result = desktop.act(action)
             if not isinstance(result, dict):
                 raise TypeError("Backend action result must be a dict")
@@ -413,6 +419,14 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             if state["failures"] >= 3:
                 state["status"], state["stop_reason"] = "blocked", "action_failures"
                 break
+        except LeaseLost:
+            if state.get("pending_action"):
+                state["status"], state["stop_reason"] = "blocked", "reconciliation_required"
+                _record(state, "lease_lost", "action outcome requires reconciliation")
+            else:
+                _pause(state, "lease_lost")
+                _record(state, "lease_lost", "stopped before the next action")
+            break
         except TokenBudgetExceeded:
             _pause(state, "model_budget_exhausted")
             break

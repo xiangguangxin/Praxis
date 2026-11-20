@@ -1,6 +1,36 @@
-"""Bounded worker with renewable leases and stale-owner fencing."""
+"""Bounded worker with renewable leases, cooperative cancellation and stale-owner fencing."""
+from inspect import Parameter, signature
 from threading import Event, Thread
 from .scheduler import LeaseLost
+
+
+class LeaseGuard:
+    """Cooperative cancellation token passed to lease-aware job executors.
+
+    A lost lease prevents subsequent guarded operations. It cannot forcibly stop
+    an external operation that is already in progress.
+    """
+    def __init__(self):
+        self._lost = Event()
+
+    @property
+    def cancelled(self):
+        return self._lost.is_set()
+
+    def cancel(self):
+        self._lost.set()
+
+    def raise_if_lost(self):
+        if self.cancelled:
+            raise LeaseLost("Worker lease was lost; stop before the next side effect")
+
+
+def _accepts_lease_guard(callback):
+    try:
+        parameters = signature(callback).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == "lease_guard" or p.kind == Parameter.VAR_KEYWORD for p in parameters)
 
 class Worker:
     def __init__(self, scheduler, execute, *, lease_seconds=60, heartbeat_interval=None):
@@ -20,6 +50,7 @@ class Worker:
             return {"status": "idle"}
         token, owner = job["lease_token"], job["lease_owner"]
         stop, lost = Event(), Event()
+        lease_guard = LeaseGuard()
 
         def renew():
             while not stop.wait(self.heartbeat_interval):
@@ -28,13 +59,15 @@ class Worker:
                                               lease_seconds=self.lease_seconds)
                 except Exception:
                     lost.set()
+                    lease_guard.cancel()
                     return
 
         heartbeat = Thread(target=renew, name="praxis-worker-heartbeat", daemon=True)
         heartbeat.start()
         try:
-            result = self.execute(job)
-            if lost.is_set():
+            lease_guard.raise_if_lost()
+            result = (self.execute(job, lease_guard=lease_guard)\n                      if _accepts_lease_guard(self.execute) else self.execute(job))
+            if lost.is_set() or lease_guard.cancelled:
                 return {"status": "lease_lost", "job_id": job["id"]}
             if not isinstance(result, dict):
                 raise TypeError("Job executor must return an object")

@@ -147,7 +147,7 @@ def main():
         raise SystemExit(1)
 
 
-def _execute(args):
+def _execute(args, execution_guard=None):
     from .experience import ExperienceStore
     from .planner import ModelPlanner
     from .policy import ActionPolicy
@@ -187,7 +187,7 @@ def _execute(args):
                                    download_dir=download_dir, browser_executable=args.browser_executable)
     return run_session(args.checkpoint, factory, planner, approval=args.approve_pending,
                        verifier=verifier, backend_scope=scope, trace_tools=args.trace_tools,
-                       policy=policy, approval_id=args.approval_id)
+                       policy=policy, approval_id=args.approval_id, execution_guard=execution_guard)
 
 
 if __name__ == "__main__":
@@ -199,7 +199,7 @@ def _run_worker(args):
     from .worker import Worker
     scheduler = Scheduler(args.database)
     args.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    def execute(job):
+    def execute(job, lease_guard=None):
         checkpoint = args.checkpoint_dir / (job["id"] + ".json")
         criteria = job["payload"].get("criteria")
         if not isinstance(criteria, list) or not criteria:
@@ -207,6 +207,6 @@ def _run_worker(args):
         create(checkpoint, job["goal"], criteria)
         values = vars(args).copy()
         values.update({"command": "run", "checkpoint": checkpoint, "approve_pending": False, "approval_id": None})
-        return _execute(Namespace(**values))
+        return _execute(Namespace(**values), execution_guard=lease_guard)
     return {"jobs": Worker(scheduler, execute, lease_seconds=args.lease_seconds,
                            heartbeat_interval=args.heartbeat_interval).run(max_jobs=args.max_jobs)}
