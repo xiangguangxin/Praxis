@@ -20,12 +20,13 @@ class Scheduler:
                 updated_at REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
                 result TEXT, error TEXT, lease_owner TEXT, lease_token TEXT,
                 lease_expires_at REAL, heartbeat_at REAL, started_at REAL,
-                max_attempts INTEGER NOT NULL DEFAULT 3)""")
+                max_attempts INTEGER NOT NULL DEFAULT 3, checkpoint_path TEXT, checkpoint_id TEXT)""")
             columns = {row["name"] for row in db.execute("PRAGMA table_info(jobs)")}
             migrations = {
                 "lease_owner": "TEXT", "lease_token": "TEXT", "lease_expires_at": "REAL",
                 "heartbeat_at": "REAL", "started_at": "REAL",
                 "max_attempts": "INTEGER NOT NULL DEFAULT 3",
+                "checkpoint_path": "TEXT", "checkpoint_id": "TEXT",
             }
             for name, declaration in migrations.items():
                 if name not in columns:
@@ -129,6 +130,38 @@ class Scheduler:
                 return None
             claimed = db.execute("SELECT * FROM jobs WHERE id=?", (row["id"],)).fetchone()
             return self._decode(claimed, include_lease_token=True)
+
+
+    def bind_checkpoint(self, jid, path, checkpoint_id, *, lease_token, owner=None):
+        """Persist the immutable job-to-checkpoint identity under the active lease."""
+        if not isinstance(path, str) or not path.strip() or len(path) > 4096:
+            raise ValueError("checkpoint path must be a nonempty string")
+        if not isinstance(checkpoint_id, str) or not checkpoint_id.strip() or len(checkpoint_id) > 128:
+            raise ValueError("checkpoint id must be a nonempty string")
+        now = time.time()
+        owner = self.worker_id if owner is None else owner
+        if not isinstance(lease_token, str) or not lease_token:
+            raise LeaseLost("A current lease token is required")
+        with self._session() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("""SELECT status,lease_owner,lease_token,lease_expires_at,
+                checkpoint_path,checkpoint_id FROM jobs WHERE id=?""", (jid,)).fetchone()
+            if row is None:
+                raise KeyError(jid)
+            if (row["status"] != "running" or row["lease_owner"] != owner
+                    or row["lease_token"] != lease_token or row["lease_expires_at"] is None
+                    or row["lease_expires_at"] <= now):
+                raise LeaseLost("Cannot bind a checkpoint without the active job lease")
+            if row["checkpoint_path"] is not None or row["checkpoint_id"] is not None:
+                if row["checkpoint_path"] != path or row["checkpoint_id"] != checkpoint_id:
+                    raise ValueError("Scheduled job is already bound to a different checkpoint")
+                return {"job_id": jid, "checkpoint_path": path, "checkpoint_id": checkpoint_id,
+                        "already_bound": True}
+            db.execute("""UPDATE jobs SET checkpoint_path=?,checkpoint_id=?,updated_at=?
+                WHERE id=? AND status='running' AND lease_owner=? AND lease_token=?""",
+                (path, checkpoint_id, now, jid, owner, lease_token))
+        return {"job_id": jid, "checkpoint_path": path, "checkpoint_id": checkpoint_id,
+                "already_bound": False}
 
     def heartbeat(self, jid, *, lease_token, owner=None, now=None, lease_seconds=60):
         now = self._timestamp(now, time.time())

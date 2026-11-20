@@ -75,6 +75,10 @@ def main():
     worker.add_argument("--experience-environment", default="")
     worker.add_argument("--evolution-store", type=Path)
     worker.add_argument("--evolution-environment", default="")
+    audit = commands.add_parser("audit-state", help="Audit scheduler/checkpoint consistency without modifying state")
+    audit.add_argument("--database", type=Path, required=True)
+    audit.add_argument("--checkpoint-dir", type=Path, required=True)
+
     example = commands.add_parser("demo", help="Run real Chromium with a deterministic fixture planner")
     example.add_argument("--output", type=Path, required=True)
     example.add_argument("--browser-executable")
@@ -112,6 +116,10 @@ def main():
             result = Scheduler(args.database).enqueue(args.goal, {"criteria": args.criterion}, run_at=args.run_at)
         elif args.command == "worker":
             result = _run_worker(args)
+        elif args.command == "audit-state":
+            from .coordinator import ExecutionCoordinator
+            from .scheduler import Scheduler
+            result = ExecutionCoordinator(Scheduler(args.database), args.checkpoint_dir).audit()
         elif args.command == "create":
             result = create(args.checkpoint, args.goal, args.criterion, max_steps=args.max_steps)
         elif args.command == "doctor":
@@ -144,6 +152,8 @@ def main():
     if args.command in {"run", "resume", "demo"}:
         raise SystemExit({"completed": 0, "paused": 3, "blocked": 4, "failed": 5}.get(result["status"], 5))
     if args.command == "verify" and not result["passed"]:
+        raise SystemExit(1)
+    if args.command == "audit-state" and not result["consistent"]:
         raise SystemExit(1)
 
 
@@ -195,16 +205,13 @@ if __name__ == "__main__":
 
 def _run_worker(args):
     from argparse import Namespace
+    from .coordinator import ExecutionCoordinator
     from .scheduler import Scheduler
     from .worker import Worker
     scheduler = Scheduler(args.database)
-    args.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    coordinator = ExecutionCoordinator(scheduler, args.checkpoint_dir)
     def execute(job, lease_guard=None):
-        checkpoint = args.checkpoint_dir / (job["id"] + ".json")
-        criteria = job["payload"].get("criteria")
-        if not isinstance(criteria, list) or not criteria:
-            raise ValueError("Scheduled job requires acceptance criteria")
-        create(checkpoint, job["goal"], criteria)
+        checkpoint = coordinator.open_checkpoint(job)
         values = vars(args).copy()
         values.update({"command": "run", "checkpoint": checkpoint, "approve_pending": False, "approval_id": None})
         return _execute(Namespace(**values), execution_guard=lease_guard)
