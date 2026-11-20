@@ -28,11 +28,14 @@ class EvolutionStore:
 
     def _read(self):
         if not self.path.exists():
-            return {"version": self.VERSION, "strategies": []}
+            return {"version": self.VERSION, "strategies": [], "source_events": []}
         data = json.loads(self.path.read_text(encoding="utf-8"))
         if (not isinstance(data, dict) or data.get("version") != self.VERSION
                 or not isinstance(data.get("strategies"), list)):
             raise EvolutionError("Unsupported evolution store")
+        data.setdefault("source_events", [])
+        if not isinstance(data["source_events"], list):
+            raise EvolutionError("Corrupt evolution source event inbox")
         ids = [item.get("id") for item in data["strategies"] if isinstance(item, dict)]
         if len(ids) != len(data["strategies"]) or len(set(ids)) != len(ids):
             raise EvolutionError("Corrupt evolution store")
@@ -90,6 +93,35 @@ class EvolutionStore:
         if any(("trajectory" in a) != ("trajectory" in b) for a, b in pairs):
             raise EvolutionError("Baseline and candidate trajectory evidence must be comparable")
         return pairs
+
+    def record_verified_source_event(self, event: dict) -> dict:
+        """Idempotently record a verified checkpoint; never auto-create a strategy."""
+        if not isinstance(event, dict) or event.get("type") != "evolution.verified_source_available":
+            raise EvolutionError("Unsupported evolution source event")
+        event_id, payload = event.get("id"), event.get("payload")
+        if not isinstance(event_id, str) or not event_id or not isinstance(payload, dict):
+            raise EvolutionError("Malformed evolution source event")
+        checkpoint_id = payload.get("checkpoint_id")
+        if not isinstance(checkpoint_id, str) or not checkpoint_id:
+            raise EvolutionError("Verified source event is missing checkpoint identity")
+        with checkpoint_lock(self.path):
+            data = self._read()
+            existing = next((item for item in data["source_events"] if item.get("event_id") == event_id), None)
+            if existing is not None:
+                if existing.get("checkpoint_id") != checkpoint_id:
+                    raise EvolutionError("Event ID already refers to a different checkpoint")
+                return existing
+            item = {"event_id": event_id, "checkpoint_id": checkpoint_id,
+                    "job_id": payload.get("job_id"), "goal": str(payload.get("goal", ""))[:1000],
+                    "criteria": list(payload.get("criteria", []))[:20],
+                    "verification": dict(payload.get("verification") or {}),
+                    "recorded_at": time.time(), "status": "available"}
+            data["source_events"].append(item)
+            self._write(data)
+            return item
+
+    def list_verified_sources(self) -> list[dict]:
+        return list(self._read().get("source_events", []))
 
     def propose(self, *, goal: str, environment: str, instruction: str,
                 source_experience_id: str, rationale: str) -> dict:

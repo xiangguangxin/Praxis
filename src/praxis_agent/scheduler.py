@@ -34,6 +34,17 @@ class Scheduler:
             db.execute("CREATE INDEX IF NOT EXISTS jobs_due ON jobs(status,run_at)")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_lease_expiry ON jobs(status,lease_expires_at)")
 
+            db.execute("""CREATE TABLE IF NOT EXISTS outbox_events (
+                id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
+                event_type TEXT NOT NULL, payload TEXT NOT NULL, created_at REAL NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS outbox_deliveries (
+                event_id TEXT NOT NULL, consumer TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0, available_at REAL NOT NULL,
+                lease_owner TEXT, lease_token TEXT, lease_expires_at REAL,
+                delivered_at REAL, last_error TEXT,
+                PRIMARY KEY(event_id,consumer), FOREIGN KEY(event_id) REFERENCES outbox_events(id))""")
+            db.execute("CREATE INDEX IF NOT EXISTS outbox_delivery_due ON outbox_deliveries(consumer,status,available_at)")
+
     def _connect(self):
         db = sqlite3.connect(self.database, timeout=10)
         db.row_factory = sqlite3.Row
@@ -198,7 +209,7 @@ class Scheduler:
             raise LeaseLost("No active lease owned by this scheduler")
         return row["lease_token"], owner
 
-    def _transition(self, jid, status, *, lease_token, owner=None, **fields):
+    def _transition(self, jid, status, *, lease_token, owner=None, outbox_events=(), **fields):
         now = time.time()
         owner = self.worker_id if owner is None else owner
         if not isinstance(lease_token, str) or not lease_token:
@@ -219,13 +230,41 @@ class Scheduler:
             db.execute("UPDATE jobs SET " + sql + " WHERE id=? AND status='running' AND lease_token=?",
                        (*updates.values(), jid, lease_token))
 
+            for event_type, idempotency_key, payload, consumer in outbox_events:
+                event_id = str(uuid.uuid5(uuid.NAMESPACE_URL, idempotency_key))
+                db.execute("""INSERT OR IGNORE INTO outbox_events
+                    (id,idempotency_key,event_type,payload,created_at) VALUES(?,?,?,?,?)""",
+                    (event_id, idempotency_key, event_type,
+                     json.dumps(payload, ensure_ascii=False, allow_nan=False), now))
+                db.execute("""INSERT OR IGNORE INTO outbox_deliveries
+                    (event_id,consumer,status,attempts,available_at) VALUES(?,?,'pending',0,?)""",
+                    (event_id, consumer, now))
+
     def finish(self, jid, result, *, lease_token=None, owner=None):
         if not isinstance(result, dict):
             raise ValueError("result must be object")
         encoded = json.dumps(result, ensure_ascii=False, allow_nan=False)
         token, owner = self._resolve_token(jid, lease_token, owner)
+        events = []
+        verification = result.get("verification") or {}
+        artifact = result.get("artifact_verification") or {}
+        checkpoint_id, checkpoint_path = result.get("id"), result.get("_checkpoint_path")
+        if (result.get("status") == "completed" and verification.get("level") == "independent_artifact"
+                and artifact.get("passed") is True and isinstance(checkpoint_id, str) and checkpoint_id
+                and isinstance(checkpoint_path, str) and checkpoint_path):
+            payload = {"job_id": jid, "checkpoint_id": checkpoint_id,
+                       "checkpoint_path": checkpoint_path, "goal": result.get("goal", ""),
+                       "criteria": result.get("criteria", []),
+                       "verification": {"level": "independent_artifact",
+                                        "verifier_id": verification.get("verifier_id"),
+                                        "checked_at": verification.get("checked_at")},
+                       "artifact_verification": artifact}
+            events = [
+                ("experience.verified_checkpoint", f"experience:{checkpoint_id}", payload, "experience"),
+                ("evolution.verified_source_available", f"evolution:{checkpoint_id}", payload, "evolution"),
+            ]
         self._transition(jid, "completed", lease_token=token, owner=owner,
-                         result=encoded, error=None)
+                         result=encoded, error=None, outbox_events=events)
 
     def fail(self, jid, error, *, lease_token=None, owner=None):
         if not isinstance(error, str) or not error.strip():

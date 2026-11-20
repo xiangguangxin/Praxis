@@ -212,6 +212,25 @@ praxis worker --database ./praxis-jobs.sqlite --checkpoint-dir ./job-checkpoints
 
 The worker exits after at most `--max-jobs` and marks only an agent result with status `completed` as a completed job. Each claimed job has a renewable lease and fencing token. Its checkpoint path and checkpoint ID are durably bound to the job under that lease, while the checkpoint also records its scheduled job ID. A retry reuses the same checkpoint instead of creating a fresh one; if a checkpoint that was already bound disappears or conflicts with its job, Praxis fails closed rather than silently losing execution history. If the process crashes between checkpoint publication and SQLite binding, the next lease can adopt the deterministic checkpoint after validating its goal and criteria. Use `praxis audit-state --database ./praxis-jobs.sqlite --checkpoint-dir ./job-checkpoints` for a read-only consistency report. Paused or blocked goals become failed queue entries for operator follow-up; explicit retry preserves their checkpoint and resets the attempt budget. This is a foreground local worker backed by SQLite, not a remote distributed scheduler.
 
+Verified scheduled completions are published to a SQLite transactional outbox in the same transaction that finishes the job. Only results carrying passing independent artifact-verification evidence publish learning events. Delivery is at-least-once with per-consumer leases, fencing, bounded exponential retry and dead-letter status; consumers are idempotent to tolerate a crash after their side effect but before acknowledgement.
+
+Deliver a verified checkpoint into Experience Store with an explicit operator-curated note and independent verifier:
+
+```bash
+praxis outbox-dispatch --database ./praxis-jobs.sqlite --consumer experience \
+  --store ./experiences.json --verifier ./verifier.json \
+  --environment linux-ci --note "Operator-reviewed verified workflow"
+```
+
+Record verified source availability for Evolution (this records provenance only; it does not create or promote a strategy):
+
+```bash
+praxis outbox-dispatch --database ./praxis-jobs.sqlite --consumer evolution \
+  --store ./evolution.json --note "Verified source event"
+```
+
+Experience and Evolution deliveries have independent status and retry budgets. Strategy creation and promotion remain explicit and require paired benchmark evidence.
+
 The library-level DAG orchestrator can run independent task callbacks concurrently with `max_workers`, serialize tasks that share declared resource names, and aggregate per-task results and verification evidence. The integrated GUI runtime remains serial for one shared desktop session. See the Phase 5.4 guide in [RUNTIME.md](RUNTIME.md#parallel-task-execution-and-resource-locks-phase-54).
 
 

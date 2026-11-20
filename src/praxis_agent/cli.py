@@ -75,6 +75,14 @@ def main():
     worker.add_argument("--experience-environment", default="")
     worker.add_argument("--evolution-store", type=Path)
     worker.add_argument("--evolution-environment", default="")
+    dispatch = commands.add_parser("outbox-dispatch", help="Deliver durable verified-completion events")
+    dispatch.add_argument("--database", type=Path, required=True)
+    dispatch.add_argument("--consumer", choices=("experience", "evolution"), required=True)
+    dispatch.add_argument("--limit", type=int, default=100)
+    dispatch.add_argument("--store", type=Path, required=True)
+    dispatch.add_argument("--verifier", type=Path)
+    dispatch.add_argument("--environment", default="")
+    dispatch.add_argument("--note", required=True, help="Operator-curated note attached to a verified experience")
     audit = commands.add_parser("audit-state", help="Audit scheduler/checkpoint consistency without modifying state")
     audit.add_argument("--database", type=Path, required=True)
     audit.add_argument("--checkpoint-dir", type=Path, required=True)
@@ -116,6 +124,21 @@ def main():
             result = Scheduler(args.database).enqueue(args.goal, {"criteria": args.criterion}, run_at=args.run_at)
         elif args.command == "worker":
             result = _run_worker(args)
+        elif args.command == "outbox-dispatch":
+            from .scheduler import Scheduler
+            Scheduler(args.database)  # Ensure the durable outbox schema exists before dispatch.
+            from .outbox import OutboxDispatcher, ExperienceEventConsumer, EvolutionEventConsumer
+            if args.consumer == "experience":
+                if not args.verifier or not args.environment:
+                    raise ValueError("Experience delivery requires --verifier and --environment")
+                from .experience import ExperienceStore
+                handler = ExperienceEventConsumer(ExperienceStore(args.store),
+                    FileVerifier.from_json(args.verifier), environment=args.environment, note=args.note)
+            else:
+                from .evolution import EvolutionStore
+                handler = EvolutionEventConsumer(EvolutionStore(args.store))
+            result = OutboxDispatcher(args.database, consumer=args.consumer,
+                                      handler=handler).dispatch(limit=args.limit)
         elif args.command == "audit-state":
             from .coordinator import ExecutionCoordinator
             from .scheduler import Scheduler
@@ -214,6 +237,9 @@ def _run_worker(args):
         checkpoint = coordinator.open_checkpoint(job)
         values = vars(args).copy()
         values.update({"command": "run", "checkpoint": checkpoint, "approve_pending": False, "approval_id": None})
-        return _execute(Namespace(**values), execution_guard=lease_guard)
+        result = _execute(Namespace(**values), execution_guard=lease_guard)
+        if isinstance(result, dict) and result.get("status") == "completed":
+            result = dict(result, _checkpoint_path=str(checkpoint))
+        return result
     return {"jobs": Worker(scheduler, execute, lease_seconds=args.lease_seconds,
                            heartbeat_interval=args.heartbeat_interval).run(max_jobs=args.max_jobs)}

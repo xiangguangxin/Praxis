@@ -75,7 +75,7 @@ class ExperienceStore:
 
     @_writer
     def add_verified(self, checkpoint: Path, *, verifier, environment: str, note: str,
-                     preconditions=None, key_steps=None, failure_modes=None) -> dict:
+                     preconditions=None, key_steps=None, failure_modes=None, event_id=None) -> dict:
         state = load(checkpoint)
         if state["status"] != "completed":
             raise ValueError("Only completed tasks can become experiences")
@@ -104,8 +104,18 @@ class ExperienceStore:
                                              if "sha256" in check][:20]},
         }
         data = self._read()
-        if any(existing["id"] == item["id"] for existing in data["experiences"]):
-            raise ValueError("Experience already recorded")
+        existing = next((entry for entry in data["experiences"] if entry.get("id") == item["id"]), None)
+        if existing is not None:
+            evidence = existing.get("evidence", {})
+            if (evidence.get("checkpoint_id") == state["id"]
+                    and evidence.get("verifier_id") == verifier.identity
+                    and existing.get("source") == "independently-verified"):
+                return existing
+            raise ValueError("Experience ID already exists with conflicting provenance")
+        if event_id:
+            if not isinstance(event_id, str) or not event_id:
+                raise ValueError("event_id must be a nonempty string")
+            item["source_event_id"] = event_id
         data["experiences"].append(item)
         self._write(data)
         return item
