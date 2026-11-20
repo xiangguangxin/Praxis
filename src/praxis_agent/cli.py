@@ -82,7 +82,7 @@ def main():
     dispatch.add_argument("--store", type=Path, required=True)
     dispatch.add_argument("--verifier", type=Path)
     dispatch.add_argument("--environment", default="")
-    dispatch.add_argument("--note", required=True, help="Operator-curated note attached to a verified experience")
+    dispatch.add_argument("--note", default="", help="Operator-curated note required for Experience delivery")
     audit = commands.add_parser("audit-state", help="Audit scheduler/checkpoint consistency without modifying state")
     audit.add_argument("--database", type=Path, required=True)
     audit.add_argument("--checkpoint-dir", type=Path, required=True)
@@ -129,8 +129,8 @@ def main():
             Scheduler(args.database)  # Ensure the durable outbox schema exists before dispatch.
             from .outbox import OutboxDispatcher, ExperienceEventConsumer, EvolutionEventConsumer
             if args.consumer == "experience":
-                if not args.verifier or not args.environment:
-                    raise ValueError("Experience delivery requires --verifier and --environment")
+                if not args.verifier or not args.environment or not args.note:
+                    raise ValueError("Experience delivery requires --verifier, --environment and --note")
                 from .experience import ExperienceStore
                 handler = ExperienceEventConsumer(ExperienceStore(args.store),
                     FileVerifier.from_json(args.verifier), environment=args.environment, note=args.note)

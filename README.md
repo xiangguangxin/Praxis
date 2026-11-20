@@ -226,7 +226,7 @@ Record verified source availability for Evolution (this records provenance only;
 
 ```bash
 praxis outbox-dispatch --database ./praxis-jobs.sqlite --consumer evolution \
-  --store ./evolution.json --note "Verified source event"
+  --store ./evolution.json
 ```
 
 Experience and Evolution deliveries have independent status and retry budgets. Strategy creation and promotion remain explicit and require paired benchmark evidence.
