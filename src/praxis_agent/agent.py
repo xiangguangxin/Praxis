@@ -154,7 +154,8 @@ def run_session(path: Path, session_factory, planner, *, approval=False, verifie
         persist(path, state)
         try:
             with session_factory() as backend:
-                return _run_locked(path, backend, planner, trace_tools=trace_tools, state=state,\n                                   execution_guard=execution_guard, **options)
+                return _run_locked(path, backend, planner, trace_tools=trace_tools, state=state,
+                                   execution_guard=execution_guard, **options)
         except KeyboardInterrupt:
             if not state.get("pending_action") and state["status"] != "completed":
                 _pause(state, "interrupted")

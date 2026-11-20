@@ -66,7 +66,8 @@ class Worker:
         heartbeat.start()
         try:
             lease_guard.raise_if_lost()
-            result = (self.execute(job, lease_guard=lease_guard)\n                      if _accepts_lease_guard(self.execute) else self.execute(job))
+            result = (self.execute(job, lease_guard=lease_guard)
+                      if _accepts_lease_guard(self.execute) else self.execute(job))
             if lost.is_set() or lease_guard.cancelled:
                 return {"status": "lease_lost", "job_id": job["id"]}
             if not isinstance(result, dict):
