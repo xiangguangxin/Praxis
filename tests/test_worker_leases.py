@@ -101,6 +101,23 @@ class WorkerLeaseTests(unittest.TestCase):
         self.assertEqual(result["status"],"failed")
         self.assertEqual(self.scheduler.get(job["id"])["status"],"failed")
 
+
+    def test_lost_heartbeat_cancels_guarded_executor(self):
+        job=self.scheduler.enqueue("cancel on lease loss")
+        entered=Event()
+        def execute(item, *, lease_guard):
+            entered.set()
+            deadline=time.monotonic()+2
+            while time.monotonic()<deadline:
+                lease_guard.raise_if_lost()
+                time.sleep(0.01)
+            return {"status":"completed"}
+        with patch.object(self.scheduler,"heartbeat",side_effect=LeaseLost("lease expired")):
+            result=Worker(self.scheduler,execute,lease_seconds=1,heartbeat_interval=0.05).run_once()
+        self.assertTrue(entered.is_set())
+        self.assertEqual(result["status"],"lease_lost")
+        self.assertNotEqual(self.scheduler.get(job["id"])["status"],"completed")
+
     def test_invalid_lease_configuration_is_rejected(self):
         with self.assertRaises(ValueError):
             Worker(self.scheduler,lambda item:{},lease_seconds=0.5)
