@@ -548,6 +548,24 @@ praxis-evolution --store ./evolution.json rollback <strategy-id> \
 praxis-evolution --store ./evolution.json list --status promoted
 ```
 
+Insight-grounded candidate generation is also available after producing the deterministic learning reports. Mine repeated failures and cluster active verified experiences first, then explicitly select one cluster, one repeated failure pattern and a source experience that belongs to that cluster:
+
+```sh
+praxis-learning mine-failures --checkpoints ./checkpoints --min-occurrences 2 \
+  --output ./reports/failure-patterns.json
+praxis-learning cluster-experiences --store ./experiences.json \
+  --environment win11-app-v1 --min-similarity 0.35 \
+  --output ./reports/experience-clusters.json
+praxis-evolution --store ./evolution.json generate-from-insights \
+  --experience-store ./experiences.json \
+  --cluster-report ./reports/experience-clusters.json \
+  --failure-report ./reports/failure-patterns.json \
+  --cluster-id <cluster-id> --pattern-id <pattern-id> \
+  --source-experience-id <verified-experience-id>
+```
+
+Generation requires at least two observations for the failure signature and at least two active, independently verified cluster members in the same environment. It only reuses operator-curated steps shared by every cluster member; recovery guidance is selected from fixed runtime policy text, not arbitrary report prose. The resulting strategy stores its cluster/pattern provenance and is idempotently deduplicated. It remains an inert candidate and must pass the same paired benchmark gate above before promotion.
+
 Candidates are not auto-generated from model self-critique. Operators must ground proposals in verified experiences and explicitly promote after paired evaluation. The evolution store records report hashes, decision metrics, promotion time and rollback reason. No source code is self-modified.
 
 

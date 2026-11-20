@@ -256,3 +256,14 @@ The library-level DAG orchestrator can run independent task callbacks concurrent
 Praxis keeps learning conservative and auditable: a strategy candidate must cite an active independently verified experience, pass paired baseline-vs-candidate benchmark evaluation with matching provenance, and be explicitly promoted before normal planners can retrieve it. Candidates are never silently activated. Promoted strategies remain untrusted hints; they cannot authorize tools or satisfy acceptance criteria. Rollback immediately removes a strategy from retrieval; a failed reassessment automatically suspends a regressing strategy.
 
 See the [Phase 6 self-evolution guide](RUNTIME.md#phase-6-evidence-gated-self-evolution) for the full proposal → paired evaluation → promotion → rollback workflow. This phase does not self-modify runtime source code.
+Insight-grounded generation is an explicit opt-in step. It requires a repeated failure pattern (at least two observations), a multi-member experience cluster, and a source experience that remains independently verified and active. Generated candidates reuse only operator-curated steps shared by every cluster member; recovery wording comes from fixed runtime guidance, not report-provided text. Identical insight inputs are idempotently deduplicated. This creates an inert candidate only—paired benchmark evaluation and explicit promotion are still required.
+
+```bash
+praxis-evolution --store ./evolution.json generate-from-insights \
+  --experience-store ./experiences.json \
+  --cluster-report ./reports/experience-clusters.json \
+  --failure-report ./reports/failure-patterns.json \
+  --cluster-id <cluster-id> --pattern-id <pattern-id> \
+  --source-experience-id <verified-experience-id>
+```
+

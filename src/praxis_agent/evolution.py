@@ -124,7 +124,7 @@ class EvolutionStore:
         return list(self._read().get("source_events", []))
 
     def propose(self, *, goal: str, environment: str, instruction: str,
-                source_experience_id: str, rationale: str) -> dict:
+                source_experience_id: str, rationale: str, insight_provenance: dict | None = None) -> dict:
         for value, name, limit in ((goal, "goal", 500), (environment, "environment", 200),
                                    (instruction, "instruction", 600), (rationale, "rationale", 400)):
             if not isinstance(value, str) or not value.strip() or len(value) > limit:
@@ -142,11 +142,119 @@ class EvolutionStore:
                 "instruction": instruction, "rationale": rationale,
                 "source_experience_id": source_experience_id, "status": "candidate",
                 "created_at": time.time(), "evaluation": None, "promoted_at": None}
+        if insight_provenance is not None:
+            if (not isinstance(insight_provenance, dict)
+                    or set(insight_provenance) != {"cluster_id", "pattern_id", "pattern_category",
+                                                   "pattern_occurrences", "member_experience_ids"}):
+                raise EvolutionError("Malformed insight provenance")
+            fingerprint_payload = {
+                "goal": goal, "environment": environment, "instruction": instruction,
+                "source_experience_id": source_experience_id,
+                "insight_provenance": insight_provenance,
+            }
+            item["insight_fingerprint"] = hashlib.sha256(
+                json.dumps(fingerprint_payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            ).hexdigest()
+            item["insight_provenance"] = insight_provenance
         with checkpoint_lock(self.path):
             data = self._read()
+            fingerprint = item.get("insight_fingerprint")
+            if fingerprint:
+                existing = next((entry for entry in data["strategies"]
+                                 if entry.get("insight_fingerprint") == fingerprint), None)
+                if existing is not None:
+                    return existing
             data["strategies"].append(item)
             self._write(data)
         return item
+
+    def propose_from_insights(self, *, cluster: dict, failure_pattern: dict,
+                              source_experience_id: str) -> dict:
+        """Create an inert strategy from a verified cluster and repeated failure pattern."""
+        if (not isinstance(cluster, dict) or cluster.get("schema_version") != 1
+                or cluster.get("method") != "weighted_lexical_jaccard_complete_link"):
+            raise EvolutionError("Unsupported or untrusted experience cluster report")
+        members = cluster.get("member_experience_ids")
+        environment = cluster.get("environment")
+        if (not isinstance(members, list) or len(members) < 2 or len(members) > 50
+                or any(not isinstance(value, str) or not value for value in members)
+                or len(set(members)) != len(members)
+                or not isinstance(environment, str) or not environment.strip()):
+            raise EvolutionError("Cluster must contain 2..50 unique experience IDs and an environment")
+        if (not isinstance(failure_pattern, dict) or failure_pattern.get("schema_version") != 1
+                or failure_pattern.get("evidence_strength") != "observed_signature_frequency_not_root_cause_confidence"
+                or type(failure_pattern.get("occurrences")) is not int
+                or failure_pattern["occurrences"] < 2
+                or not isinstance(failure_pattern.get("pattern_id"), str)
+                or not failure_pattern.get("pattern_id")
+                or not isinstance(failure_pattern.get("checkpoint_ids"), list)
+                or any(not isinstance(value, str) or not value
+                       for value in failure_pattern["checkpoint_ids"])
+                or len(set(failure_pattern["checkpoint_ids"])) < 2
+                or failure_pattern["occurrences"] != len(set(failure_pattern["checkpoint_ids"]))):
+            raise EvolutionError("A repeated, provenance-bearing failure pattern is required")
+        recovery_by_category = {
+            "uncertain_action": "stop and reconcile the external outcome before any retry",
+            "policy_denied": "stop and request an authorized policy review; never bypass policy",
+            "verification_failed": "inspect failed acceptance checks and revise unfinished work",
+            "transient_backend_failure": "reobserve backend readiness before a bounded retry",
+            "action_failed": "reobserve the target and choose a different bounded action",
+            "budget_exhausted": "split the goal or adjust the budget; do not repeat the unchanged plan",
+        }
+        category = failure_pattern.get("category")
+        recovery = recovery_by_category.get(category)
+        if recovery is None:
+            raise EvolutionError("Failure pattern category is not eligible for strategy generation")
+        if self.experience_store is None:
+            raise EvolutionError("An ExperienceStore is required for insight-grounded generation")
+        records = self.experience_store._read()["experiences"]
+        by_id = {entry.get("id"): entry for entry in records if isinstance(entry, dict)}
+        if source_experience_id not in members:
+            raise EvolutionError("Strategy source must belong to the selected experience cluster")
+        selected = []
+        for identity in members:
+            entry = by_id.get(identity)
+            if (entry is None or entry.get("source") != "independently-verified"
+                    or entry.get("status", "active") != "active"
+                    or entry.get("environment") != environment):
+                raise EvolutionError("Every cluster member must remain active and independently verified")
+            steps = entry.get("key_steps")
+            if not isinstance(steps, list) or not steps:
+                raise EvolutionError("Every cluster member needs operator-curated key steps")
+            selected.append(entry)
+        source = by_id[source_experience_id]
+        shared_steps = set(selected[0]["key_steps"])
+        for entry in selected[1:]:
+            shared_steps.intersection_update(entry["key_steps"])
+        ordered_steps = [step for step in source["key_steps"] if step in shared_steps]
+        if not ordered_steps:
+            raise EvolutionError("Cluster has no shared operator-curated key steps")
+        preconditions = source.get("preconditions", [])
+        instruction = (
+            "Confirm these preconditions: " + (
+                "; ".join(preconditions[:3]) if preconditions else "reobserve the current application state"
+            ) + ". Follow the shared verified steps: " + " -> ".join(ordered_steps[:4]) +
+            f". If {category} occurs, {recovery}. Reobserve after each action and independently verify the result."
+        )
+        if len(instruction) > 600:
+            raise EvolutionError("Generated strategy exceeds the 600-character instruction limit")
+        pattern_id = failure_pattern["pattern_id"]
+        cluster_id = cluster.get("cluster_id")
+        if not isinstance(cluster_id, str) or not cluster_id:
+            raise EvolutionError("Cluster identity is required")
+        provenance = {
+            "cluster_id": cluster_id, "pattern_id": pattern_id,
+            "pattern_category": category, "pattern_occurrences": failure_pattern["occurrences"],
+            "member_experience_ids": sorted(members),
+        }
+        rationale = (
+            f"Generated from verified experience cluster {cluster_id} and repeated observed "
+            f"failure pattern {pattern_id} ({category}, {failure_pattern['occurrences']} observations). "
+            "This is a candidate only; benchmark before promotion."
+        )
+        return self.propose(goal=source["goal"], environment=environment,
+            instruction=instruction, source_experience_id=source_experience_id,
+            rationale=rationale, insight_provenance=provenance)
 
     def evaluate_variants(self, strategy_id: str, report, *, baseline_variant="baseline",
                           candidate_variant="strategy_candidate") -> dict:

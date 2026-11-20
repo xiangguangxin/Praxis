@@ -155,5 +155,74 @@ class EvolutionLifecycleTests(unittest.TestCase):
             self.store.propose(goal="New workflow",environment="linux-ci",instruction="Try another route.",
                 source_experience_id=self.experience["id"],rationale="test invalid source")
 
+
+    def test_insights_generate_deduplicated_inert_strategy_from_shared_verified_steps(self):
+        second_checkpoint=self.root/"verified-second.json"
+        state=create(second_checkpoint,"Generate a verified coverage report",["report"])
+        state["status"]="completed"
+        persist(second_checkpoint,state)
+        (self.root/"report-second.txt").write_text("PASS")
+        second=self.experiences.add_verified(second_checkpoint,
+            verifier=FileVerifier({"report":{"path":"report-second.txt","contains":"PASS"}},self.root),
+            environment="linux-ci",note="Second verified report",
+            preconditions=["fixture is available"],key_steps=["Open build summary","Generate report"])
+        cluster={"schema_version":1,"cluster_id":"cluster-123","environment":"linux-ci",
+            "method":"weighted_lexical_jaccard_complete_link",
+            "member_experience_ids":sorted([self.experience["id"],second["id"]])}
+        pattern={"schema_version":1,"pattern_id":"pattern-123","category":"transient_backend_failure",
+            "occurrences":3,"checkpoint_ids":["run-1","run-2","run-3"],
+            "evidence_strength":"observed_signature_frequency_not_root_cause_confidence"}
+        candidate=self.store.propose_from_insights(cluster=cluster,failure_pattern=pattern,
+            source_experience_id=self.experience["id"])
+        self.assertEqual(candidate["status"],"candidate")
+        self.assertIn("Open build summary -> Generate report",candidate["instruction"])
+        self.assertIn("reobserve backend readiness",candidate["instruction"])
+        self.assertEqual(candidate["insight_provenance"]["pattern_id"],"pattern-123")
+        self.assertEqual(self.store.propose_from_insights(cluster=cluster,failure_pattern=pattern,
+            source_experience_id=self.experience["id"])["id"],candidate["id"])
+        self.assertEqual(self.store.search("coverage report",environment="linux-ci"),[])
+
+    def test_insight_generation_rejects_single_observation_and_invalid_cluster_member(self):
+        second_checkpoint=self.root/"verified-second.json"
+        state=create(second_checkpoint,"Generate a verified coverage report",["report"])
+        state["status"]="completed"
+        persist(second_checkpoint,state)
+        (self.root/"report-second.txt").write_text("PASS")
+        second=self.experiences.add_verified(second_checkpoint,
+            verifier=FileVerifier({"report":{"path":"report-second.txt","contains":"PASS"}},self.root),
+            environment="linux-ci",note="Second verified report",
+            preconditions=["fixture is available"],key_steps=["Open build summary","Generate report"])
+        cluster={"schema_version":1,"cluster_id":"cluster-123","environment":"linux-ci",
+            "method":"weighted_lexical_jaccard_complete_link",
+            "member_experience_ids":[self.experience["id"],second["id"]]}
+        pattern={"schema_version":1,"pattern_id":"pattern-123","category":"transient_backend_failure",
+            "occurrences":1,"checkpoint_ids":["run-1"],
+            "evidence_strength":"observed_signature_frequency_not_root_cause_confidence"}
+        with self.assertRaises(EvolutionError):
+            self.store.propose_from_insights(cluster=cluster,failure_pattern=pattern,
+                source_experience_id=self.experience["id"])
+        self.experiences.invalidate(second["id"],reason="stale source")
+        pattern["occurrences"]=2
+        pattern["checkpoint_ids"]=["run-1","run-2"]
+        with self.assertRaises(EvolutionError):
+            self.store.propose_from_insights(cluster=cluster,failure_pattern=pattern,
+                source_experience_id=self.experience["id"])
+
+    def test_insight_generation_rejects_unknown_failure_categories_and_nonmember_source(self):
+        cluster={"schema_version":1,"cluster_id":"cluster-123","environment":"linux-ci",
+            "method":"weighted_lexical_jaccard_complete_link",
+            "member_experience_ids":[self.experience["id"],"missing"]}
+        pattern={"schema_version":1,"pattern_id":"pattern-123","category":"invented",
+            "occurrences":2,"checkpoint_ids":["run-1","run-2"],
+            "evidence_strength":"observed_signature_frequency_not_root_cause_confidence"}
+        with self.assertRaises(EvolutionError):
+            self.store.propose_from_insights(cluster=cluster,failure_pattern=pattern,
+                source_experience_id=self.experience["id"])
+        cluster["member_experience_ids"]=[self.experience["id"],"another"]
+        pattern["category"]="action_failed"
+        with self.assertRaises(EvolutionError):
+            self.store.propose_from_insights(cluster=cluster,failure_pattern=pattern,
+                source_experience_id="not-a-member")
+
 if __name__=="__main__":
     unittest.main()
