@@ -138,8 +138,8 @@ class ExperienceEventConsumer:
         if event.get("type") != "experience.verified_checkpoint":
             raise OutboxError("Unsupported experience event")
         payload = event["payload"]
-        self.store.add_verified(Path(payload["checkpoint_path"]), verifier=self.verifier,
-                                environment=self.environment, note=self.note, event_id=event["id"])
+        return self.store.add_verified(Path(payload["checkpoint_path"]), verifier=self.verifier,
+                                       environment=self.environment, note=self.note, event_id=event["id"])
 
 
 class EvolutionEventConsumer:

@@ -107,11 +107,11 @@ class ExperienceStore:
         existing = next((entry for entry in data["experiences"] if entry.get("id") == item["id"]), None)
         if existing is not None:
             evidence = existing.get("evidence", {})
-            if (evidence.get("checkpoint_id") == state["id"]
+            if (event_id and evidence.get("checkpoint_id") == state["id"]
                     and evidence.get("verifier_id") == verifier.identity
                     and existing.get("source") == "independently-verified"):
                 return existing
-            raise ValueError("Experience ID already exists with conflicting provenance")
+            raise ValueError("Experience already recorded or ID has conflicting provenance")
         if event_id:
             if not isinstance(event_id, str) or not event_id:
                 raise ValueError("event_id must be a nonempty string")
