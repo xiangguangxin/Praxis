@@ -145,7 +145,24 @@ praxis run ./goal-state.json --nova /absolute/path/to/nova \
   --experience-store ./experiences.json --experience-environment win11-app-v1
 ```
 
-Matching uses simple lexical overlap and exact environment tags, not embeddings. Default confidence half-life: 30 days; retention eligibility: 90 days; two explicitly recorded verified failures invalidate an experience. Experience writes use a process lock. The store is neither encrypted nor
+Matching uses simple lexical overlap and exact environment tags, not embeddings.
+
+### Failure mining and experience clustering
+
+Praxis includes offline, deterministic learning analytics. Failure mining scans saved checkpoints and groups trusted runtime failure signatures; it reports recurrence and source checkpoint IDs, but does not claim that frequency proves a root cause. Experience clustering considers only active, independently verified entries and keeps environments separate. It uses weighted lexical Jaccard similarity with complete-link assignment, so every pair in a cluster meets the configured threshold. No embedding provider or model call is required.
+
+```bash
+# Mine current failure snapshots; add --recursive for nested checkpoint folders.
+praxis-learning mine-failures --checkpoints ./checkpoints --min-occurrences 2 \
+  --output ./reports/failure-patterns.json
+
+# Cluster curated experiences for one runtime environment.
+praxis-learning cluster-experiences --store ./experiences.json \
+  --environment win11-app-v1 --min-similarity 0.35 \
+  --output ./reports/experience-clusters.json
+```
+
+These reports are analysis artifacts, not trusted strategies. Pattern frequency is not root-cause confidence; clusters are lexical similarity groups, not semantic equivalence. Candidate generation and benchmark-gated promotion remain separate explicit steps. Default confidence half-life: 30 days; retention eligibility: 90 days; two explicitly recorded verified failures invalidate an experience. Experience writes use a process lock. The store is neither encrypted nor
 access-controlled. Curated entries can include preconditions, key steps, failure
 modes and independent verification references; these remain untrusted planning hints.
 
