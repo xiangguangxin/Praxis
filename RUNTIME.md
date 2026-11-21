@@ -1,6 +1,6 @@
 # Praxis Runtime — Detailed Guide
 
-Standalone Python package extracted from OpenAS. Provides a bounded observe–decide–act loop, pluggable model, desktop and browser adapters, and resumable JSON checkpoints. It is **not** a daemon or independently verified autonomous agent.
+Standalone Python package extracted from OpenAS. Provides a bounded observe–decide–act loop, pluggable model, desktop, browser and configured tool adapters, and resumable JSON checkpoints. It is **not** a daemon or independently verified autonomous agent.
 
 ```sh
 python -m pip install -e .
@@ -12,6 +12,19 @@ praxis resume ./goal-state.json --nova /absolute/path/to/nova
 ```
 
 Restart with the same checkpoint to resume. A crash during an in-flight action blocks until manual reconciliation; never blindly replays. Risky actions pause for explicit approval. Model evidence is **not independent verification**: inject a custom verifier when calling `run()` for reliable artifact checks. Existing checkpoint v1 remains readable. OpenAS integration scripts remain in the separate OpenAS repository and can delegate to the installed Praxis package. No Windows/macOS end-to-end test has been completed.
+
+## Current extension guides
+
+| Capability | Guide |
+| --- | --- |
+| Intermediate and final acceptance | [Layered acceptance](docs/layered-acceptance.md) |
+| DOM, HTTP, SQLite, application and pixel checks | [Configured verifiers](docs/configured-verifiers.md) |
+| Twelve resettable browser tasks | [Live benchmark suite](docs/live-benchmark-suite.md) |
+| Retry, failover, cost and deadline controls | [Model resilience](docs/model-resilience.md) |
+| HTML/JSON run inspection and journals | [Run timeline](docs/run-timeline.md) |
+| Exposure tracking and evidence-backed feedback | [Hint outcomes](docs/hint-outcomes.md) |
+| Persistent progress and failure context | [Context memory](docs/context-memory.md) |
+| File/API/command/MCP backends and Python embedding | [Tool SDK](docs/tool-sdk.md) |
 
 ## Phase 3: recover safely
 
@@ -50,7 +63,7 @@ praxis verify ./goal-state.json --verifier ./coverage-rules.json
 Install the optional browser dependencies and run the local fixture from the repository root. The fixture imitates a coverage GUI and produces a sample report.
 
 ```sh
-python -m pip install -e 'packages/gui-agent-runtime[browser]'
+python -m pip install -e '.[browser]'
 python -m playwright install chromium
 python -m http.server 8080 --bind 127.0.0.1 --directory examples/coverage-web
 ```
@@ -105,7 +118,7 @@ praxis run ./goal-state.json --nova /absolute/path/to/nova \
   --max-ui-text-chars 3000 --max-images 1
 ```
 
-`--max-model-calls` and `--max-model-tokens` are optional (0 means no limit). If a budget is reached, the agent **pauses** instead of retrying indefinitely. Model usage is saved in checkpoint `model_usage` and carries over to `resume`. When the provider reports `usage.prompt_tokens` and `usage.completion_tokens`, those are tracked as actual usage. If it omits usage, input is roughly estimated by character count, tracked separately, and output tokens are unknown. Token budgets are best-effort guards, not strict billing caps: a single request can overshoot a remaining budget, images have provider-specific costs, and requests that fail before returning usage may be unaccounted for. The model endpoint may bill for attempted requests.
+`--max-model-calls` and `--max-model-tokens` are optional (0 means no limit). Usage carries over to resume. Every provider attempt consumes the call budget. Provider-reported token usage is kept separate from estimated input/output reservations when usage is missing, including failed requests. Optional pricing supports integer-microdollar cost accounting and pre-request reservations; run deadlines accumulate across resume. These remain estimate-based controls rather than provider billing guarantees. See [model request controls](docs/model-resilience.md) for retries, circuits, compatible-profile failover, pricing and deadline behavior.
 
 The planner receives a paged tool directory and selected complete schemas; use internal discovery to load tools beyond the current page. For accurate before/after savings, compare `model_usage` across equivalent runs with the same model, UI, and goal. Real Nova Windows/macOS E2E testing is still outstanding.
 
@@ -376,7 +389,7 @@ separate real-backend validation.
 
 ## Integrated planning and model routing
 
-When using the standard CLI, ModelPlanner proposes a DAG before its first GUI action. If an independent `FileVerifier` or `CriteriaVerifier` is configured and each task maps its acceptance entries to the goal's exact criteria (covering all criteria), the GUI loop enforces tasks in dependency order. The model uses `task_complete` to request completion; the configured verifier, not model text, decides whether the task passes. Failed checks are retried within a bounded per-task budget, and exhausted failures block dependents. Task status and per-task fresh-artifact baselines are stored in the goal checkpoint. Plans without a valid acceptance mapping, or runs without an independent verifier, remain advisory for backward compatibility. Existing checkpoints without a plan acquire one on their next run.
+When using the standard CLI, ModelPlanner proposes a DAG before its first GUI action. If an independent `FileVerifier` or `CriteriaVerifier` is configured and each task maps its acceptance entries to the trusted verifier rule catalog (including intermediate checks and covering all final Goal criteria), the GUI loop enforces tasks in dependency order. The model uses `task_complete` to request completion; the configured verifier, not model text, decides whether the task passes. Failed checks are retried within a bounded per-task budget, and exhausted failures block dependents. Task status and per-task fresh-artifact baselines are stored in the goal checkpoint. Plans without a valid acceptance mapping, or runs without an independent verifier, remain advisory for backward compatibility. Existing checkpoints without a plan acquire one on their next run.
 
 Pass `--model-profiles profiles.json` to enable capability-aware routing. Each profile declares `name`, `model`, `endpoint`, `api_key_env`, `capabilities` and optional `max_cost_tier`. A screenshot request requires a profile with `vision`; a failed action prefers a higher cost tier. API keys are read from the named environment variables, not from the JSON file.
 
@@ -459,14 +472,14 @@ The parallel `TaskOrchestrator` remains a library-level orchestration primitive 
 
 The standard `praxis run` / `praxis resume` loop now supports verified task execution without bypassing the existing GUI safety pipeline:
 
-1. The model proposes a DAG whose task acceptance entries are exact strings from the Goal criteria. Every Goal criterion must be covered.
+1. The model proposes a DAG whose task acceptance entries are exact strings from the trusted verifier rule catalog, including intermediate checks. Every final Goal criterion must be covered.
 2. With an independent `--verifier` configuration, Praxis activates one ready task at a time and includes its goal, acceptance criteria, and attempt count in the next model context.
 3. The model performs normal observed GUI actions. It may request `task_complete`, but that request is not proof.
 4. Praxis evaluates only that task's configured verifier rules. File verification captures a separate fresh-artifact baseline at task start. Only a passing independent check unlocks dependent tasks.
 5. Failed checks trigger a bounded task retry. Exhausted failures block dependent tasks while independent branches remain eligible.
 6. Once all tasks pass, the ordinary Goal-level verifier runs again before the Goal is marked completed.
 
-The task lifecycle is checkpointed in the same Goal file, so a paused run resumes the active task instead of starting the DAG over. A run with no independent verifier, or a legacy plan that does not map its acceptance entries to the Goal criteria, remains advisory rather than claiming verified orchestration. Model-generated plans never bypass action schema validation, operator policy, approval gates, write-ahead action records, or uncertain-action reconciliation.
+The task lifecycle is checkpointed in the same Goal file, so a paused run resumes the active task instead of starting the DAG over. A run with no independent verifier, or a legacy plan that does not map its acceptance entries to trusted verifier rules, remains advisory rather than claiming verified orchestration. Model-generated plans never bypass action schema validation, operator policy, approval gates, write-ahead action records, or uncertain-action reconciliation.
 
 Task acceptance entries currently reuse the Goal's configured criterion names; separate task-specific verifier-rule files and automatic model-assisted replanning of a failed DAG remain future work.
 
@@ -580,7 +593,7 @@ Important boundaries:
 - An action with uncertain external outcome is never automatically replanned or replayed; reconciliation remains mandatory.
 - A policy denial is not treated as a recoverable planner error and cannot be bypassed by replanning.
 - The model proposes a new DAG, but local graph validation and independent per-task verification decide whether it is accepted.
-- Completed tasks are immutable during repair. Every replacement task must use exact Goal criterion strings, and the new DAG must cover all Goal criteria.
+- Completed tasks are immutable during repair. Every replacement task must use trusted verifier criterion strings, and the new DAG must cover all final Goal criteria.
 - Action failures are diagnosed and exposed to the next planning decision; the runtime does not assume that a model-generated explanation is the cause.
 
 

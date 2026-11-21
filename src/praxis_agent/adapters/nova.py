@@ -2,9 +2,11 @@
 from __future__ import annotations
 import json, queue, subprocess, threading, re, time
 from typing import Any
-class NovaMCP:
-    def __init__(self, executable: str):
-        self.process = subprocess.Popen([executable], stdin=subprocess.PIPE,
+class StdioMCP:
+    def __init__(self, command):
+        if not isinstance(command, list) or not command or any(not isinstance(value, str) or not value for value in command):
+            raise ValueError("Explicit MCP command argv required")
+        self.process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         self.responses: queue.Queue[dict[str, Any] | None] = queue.Queue()
         self.next_id = 0
@@ -131,3 +133,8 @@ class NovaMCP:
                 stream.close()
         if self._reader is not threading.current_thread():
             self._reader.join(timeout=1)
+
+
+class NovaMCP(StdioMCP):
+    def __init__(self, executable: str):
+        super().__init__([executable])

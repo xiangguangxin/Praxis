@@ -14,17 +14,21 @@
 
 </div>
 
-Praxis is a **goal-driven agent execution runtime** extracted from [OpenAS](https://github.com/xiangguangxin/OpenAS). It runs bounded observe → plan → act → verify loops against **Windows/macOS desktop tools (Nova MCP)** or an **isolated Chromium browser**, with resumable JSON checkpoints, approval gates, artifact verification, and opt-in experience retrieval.
+Praxis is a **goal-driven agent execution runtime** extracted from [OpenAS](https://github.com/xiangguangxin/OpenAS). It runs bounded observe → plan → act → verify loops against **Windows/macOS desktop tools (Nova MCP)** an **isolated Chromium browser**, or **configured file/API/command/MCP tools**, with resumable JSON checkpoints, approval gates, artifact verification, and opt-in experience retrieval.
 
 > **Status:** Early-stage research and engineering runtime. Synthetic tests and opt-in browser fixtures are not proof of reliable real-world desktop autonomy. Praxis is not a daemon and does not run unattended in the background.
 
 ## Why Praxis?
 
+Praxis also supports a [composable tool backend and Python SDK](docs/tool-sdk.md)
+for root-constrained files, configured HTTP operations, fixed commands and
+allowlisted stdio MCP tools, using the same approval and verification loop.
+
 | Principle | Current mechanism |
 | --- | --- |
 | **Plan** | Multimodal planner plus validated, mutable DAG orchestration with per-node acceptance checks |
-| **Act** | Tool adapters for authorized Nova MCP desktops or Playwright browser sessions |
-| **Verify** | Optional independent allowlisted file checks, provenance, freshness, and tool trajectory rules |
+| **Act** | Tool adapters for authorized Nova MCP desktops, Playwright browsers or configured tools |
+| **Verify** | Optional independent artifact/application checks, provenance, freshness, and tool trajectory rules |
 | **Learn** | Curated verified experiences plus benchmark-gated, versioned strategy promotion and rollback; task-aware model routing |
 | **Recover** | Durable checkpoint, process lock, manual reconciliation after uncertain actions |
 
@@ -90,6 +94,8 @@ flowchart TD
     A -->|sensitive action| H["Pause for approval"]
     T --> N["Nova MCP · Desktop"]
     T --> B["Playwright · Browser"]
+    T --> U["Configured tools · SDK"]
+    U --> C
     N --> C["Checkpoint + tool trace"]
     B --> C
     C --> V["Independent verifier (opt-in)"]
@@ -105,7 +111,11 @@ paused, 4 for blocked and 5 for failed execution.
 
 The planner may assert completion; **without an independent verifier**, this is model-evidence compatibility mode rather than independently established success. Task-level verification failures can trigger a bounded replacement of unfinished DAG work. Uncertain actions still require explicit reconciliation. If an action's outcome is uncertain after a crash, Praxis blocks replay until the operator reconciles it.
 
-## Autonomous DAG orchestration (Phase 5)\n\nThe reusable `planning` package supports per-node dependencies, acceptance checks, independent verification evidence, bounded retries, checkpoint/resume, explicit interruption reconciliation, and safe replacement of unfinished work while preserving completed nodes. It also supports adding/removing pending nodes. See [Phase 5 orchestration guide](RUNTIME.md#phase-5-autonomous-dag-orchestration). The GUI runtime enforces the validated task plan with independent per-task acceptance checks when a verifier is configured.\n\n## Independent verification
+## Autonomous DAG orchestration (Phase 5)
+
+The reusable `planning` package supports per-node dependencies, acceptance checks, independent verification evidence, bounded retries, checkpoint/resume, explicit interruption reconciliation, and safe replacement of unfinished work while preserving completed nodes. It also supports adding/removing pending nodes. See [Phase 5 orchestration guide](RUNTIME.md#phase-5-autonomous-dag-orchestration). The GUI runtime enforces the validated task plan with independent per-task acceptance checks when a verifier is configured.
+
+## Independent verification
 
 Tasks can use trusted intermediate checks while final Goal criteria are verified
 separately. See [layered acceptance](docs/layered-acceptance.md).
@@ -200,7 +210,11 @@ python scripts/check_runtime_mutations.py
 
 Offline fixtures are synthetic and must not be presented as real desktop success rates. Live Nova and browser benchmarks require real backends and independent acceptance checks; see [benchmark guide](RUNTIME.md#agent-benchmark).
 
-## Extended runtime primitives\n\nPraxis also provides opt-in building blocks for model-proposed DAG validation (DynamicTaskPlanner), deterministic context packing, capability-aware model profile selection, a durable local SQLite job queue, and an allowlisted operational event journal. These are composable library APIs; they do not automatically launch background workers or change the existing CLI agent loop. See [Phases 1–4 implementation status](docs/phases-1-to-4.md).\n\n## Boundaries and roadmap
+## Extended runtime primitives
+
+Praxis also provides opt-in building blocks for model-proposed DAG validation (DynamicTaskPlanner), deterministic context packing, capability-aware model profile selection, a durable local SQLite job queue, and an allowlisted operational event journal. These APIs are composable and do not automatically launch background workers. Current CLI integrations include durable context memory and operational journals. See [Phases 1–4 implementation status](docs/phases-1-to-4.md).
+
+## Boundaries and roadmap
 
 **Included now:** bounded agent loop, Nova/browser adapters, model gateway selection, restart-based resume and reconciliation, approval policy, local artifact verification, trace comparison, experience lifecycle, offline/live evaluation harnesses.
 
@@ -228,7 +242,7 @@ Praxis 从 OpenAS 的 GUI Agent Runtime 独立而来，目前支持 **Nova MCP �
 
 ## Integrated planning, verified task execution, model routing and scheduled jobs
 
-The GUI execution loop can call `ModelPlanner.prepare_plan()` before its first action and checkpoint the task DAG. With an independent `--verifier` configuration and task acceptance entries mapped exactly to Goal criteria, Praxis activates tasks in dependency order and independently verifies each `task_complete` request. Failed checks retry within a bounded budget; exhausted failures block dependents. Task progress and per-task fresh-artifact baselines are stored in the Goal checkpoint. Plans without an independent verifier or valid acceptance mapping remain advisory. Every GUI action still uses fresh observation, schema validation, operator policy and approval gates.
+The GUI execution loop can call `ModelPlanner.prepare_plan()` before its first action and checkpoint the task DAG. With an independent `--verifier` configuration and task acceptance entries mapped to trusted verifier rules, including intermediate checks, while covering all final Goal criteria, Praxis activates tasks in dependency order and independently verifies each `task_complete` request. Failed checks retry within a bounded budget; exhausted failures block dependents. Task progress and per-task fresh-artifact baselines are stored in the Goal checkpoint. Plans without an independent verifier or valid acceptance mapping remain advisory. Every GUI action still uses fresh observation, schema validation, operator policy and approval gates.
 
 Optional model routing uses a JSON profile file:
 

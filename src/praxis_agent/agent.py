@@ -245,6 +245,7 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
     if trace_tools:
         tool_trace.enable(state)
     if hasattr(planner, "usage"):
+        planner.usage.update({key: 0 for key in planner.usage})
         planner.usage.update(state.get("model_usage", {}))
     persist(path, state)
     discoveries = 0
@@ -423,6 +424,10 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                 raise ValueError("Action requires a name and argument object")
             phase = "validation"
             validate_action(action, observation.get("tools"))
+            if callable(getattr(desktop, "validate_action", None)):
+                desktop.validate_action(action)
+            if callable(getattr(desktop, "action_impact", None)):
+                action = dict(action, impact=desktop.action_impact(action))
             phase = "policy"
             effect, reason = policy.classify(action)
             if effect == "deny":
@@ -459,7 +464,8 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             phase = "action"
             if execution_guard is not None:
                 execution_guard.raise_if_lost()
-            result = desktop.act(action)
+            dispatch = getattr(desktop, "act_authorized", desktop.act)
+            result = dispatch(action)
             if not isinstance(result, dict):
                 raise TypeError("Backend action result must be a dict")
             ok = result.get("ok") is True
