@@ -159,6 +159,51 @@ class ExperienceStore:
         raise KeyError(experience_id)
 
     @_writer
+    def feedback_run(self, experience_id, checkpoint, *, verifier, outcome, note):
+        """Operator attribution backed by rechecked run evidence; idempotent per run."""
+        from .verification import FileVerifier
+        from .policy import fingerprint
+        from .hint_tracking import source_identity
+        if type(verifier) is not FileVerifier or outcome not in {"success", "failure"} or not isinstance(note, str) or not note.strip():
+            raise ValueError("File verifier, outcome and operator attribution note required")
+        state = load(Path(checkpoint))
+        data = self._read()
+        receipt_id = fingerprint([state["id"], experience_id])
+        receipts = data.setdefault("run_feedback", {})
+        if receipt_id in receipts:
+            if receipts[receipt_id]["outcome"] != outcome:
+                raise ValueError("Conflicting feedback for the same run and experience")
+            return receipts[receipt_id]
+        item = next((item for item in data["experiences"] if item.get("id") == experience_id), None)
+        if item is None or item.get("status", "active") != "active":
+            raise ValueError("Active source experience required")
+        exposed = any(hint.get("kind") == "experience" and hint.get("id") == experience_id
+                      and hint.get("environment") == item.get("environment")
+                      and hint.get("source_store") == source_identity(self)
+                      for hint in state.get("hint_exposures", []) if isinstance(hint, dict))
+        if not exposed or state.get("pending_action") or state.get("verifier_id") != verifier.identity:
+            raise ValueError("Run must have matching exposure, original verifier and no uncertain action")
+        evaluation = verifier.evaluate(state)
+        if outcome == "success":
+            eligible = (state["status"] == "completed" and state.get("verification_level") == "independent_artifact"
+                        and evaluation["passed"])
+        else:
+            eligible = state["status"] in {"blocked", "failed"} and not evaluation["passed"]
+        if not eligible: raise ValueError("Run status and independently rechecked outcome do not match feedback")
+        field = "successes" if outcome == "success" else "failures"
+        item[field] = item.get(field, 0) + 1
+        item["last_feedback_at"], item["last_feedback_note"] = time.time(), note[:200]
+        if outcome == "failure" and item["failures"] >= 2:
+            item["status"], item["invalidated_reason"] = "invalidated", "two verified failures"
+        receipt = {"id": receipt_id, "checkpoint_id": state["id"], "experience_id": experience_id,
+                   "outcome": outcome, "verifier_id": verifier.identity, "checked_at": time.time(),
+                   "note": note[:200], "source": "operator-attributed-run-feedback"}
+        receipts[receipt_id] = receipt
+        self._write(data)
+        return receipt
+
+
+    @_writer
     def invalidate(self, experience_id: str, *, reason: str) -> dict:
         if not reason.strip():
             raise ValueError("Reason required")

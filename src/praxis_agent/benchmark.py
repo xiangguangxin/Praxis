@@ -105,6 +105,8 @@ def _record(case, index, variant, state, verifier, actions, elapsed):
         "cost_microusd": usage.get("cost_microusd", 0),
         "cost_unknown_calls": usage.get("cost_unknown_calls", 0),
         "provider_retries": usage.get("retries", 0),
+        "retrieved_hints": [{key: hint.get(key) for key in ("kind", "id", "environment", "source_store")}
+                            for hint in state.get("hint_exposures", [])],
         **trajectory,
     }
 

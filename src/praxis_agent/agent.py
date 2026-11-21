@@ -190,6 +190,13 @@ def _invoke_model(state, planner, method, observation):
         return result
     finally:
         usage = dict(getattr(planner, "usage", {}))
+        if getattr(planner, "hint_exposures", None):
+            exposures = state.setdefault("hint_exposures", [])
+            exposures.extend(planner.hint_exposures)
+            planner.hint_exposures.clear()
+            if len(exposures) > 512:
+                state["hint_exposures_dropped"] = state.get("hint_exposures_dropped", 0) + len(exposures)-512
+                del exposures[:-512]
         if hasattr(planner, "usage"): state["model_usage"] = usage
         calls = usage.get("calls", 0)-before.get("calls", 0)
         if calls > 0:

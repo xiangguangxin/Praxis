@@ -24,6 +24,12 @@ def main():
     feedback.add_argument("experience_id")
     feedback.add_argument("--outcome", choices=["success", "failure"], required=True)
     feedback.add_argument("--note", required=True)
+    run_feedback = sub.add_parser("feedback-run", help="Record idempotent operator attribution with rechecked run evidence")
+    run_feedback.add_argument("experience_id")
+    run_feedback.add_argument("checkpoint", type=Path)
+    run_feedback.add_argument("--verifier", type=Path, required=True)
+    run_feedback.add_argument("--outcome", choices=["success", "failure"], required=True)
+    run_feedback.add_argument("--note", required=True)
     invalidate = sub.add_parser("invalidate")
     invalidate.add_argument("experience_id")
     invalidate.add_argument("--reason", required=True)
@@ -37,6 +43,9 @@ def main():
                                     preconditions=args.precondition, key_steps=args.key_step, failure_modes=args.failure_mode)
     elif args.command == "search":
         result = store.search(args.query, environment=args.environment)
+    elif args.command == "feedback-run":
+        result = store.feedback_run(args.experience_id, args.checkpoint,
+                                    verifier=FileVerifier.from_json(args.verifier), outcome=args.outcome, note=args.note)
     elif args.command == "feedback":
         result = store.feedback(args.experience_id, outcome=args.outcome, note=args.note)
     elif args.command == "invalidate":
