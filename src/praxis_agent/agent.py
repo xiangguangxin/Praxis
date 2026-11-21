@@ -38,7 +38,8 @@ def _verify(state, verifier, evidence, observation):
     if isinstance(verifier, (FileVerifier, CriteriaVerifier)):
         state["artifact_verification"] = verifier.evaluate(state)
         accepted = state["artifact_verification"]["passed"]
-        level, source = (("independent_artifact", "file_verifier") if isinstance(verifier, FileVerifier)
+        level, source = ((getattr(verifier, "verification_level", "independent_artifact"),
+                          getattr(verifier, "verification_source", "file_verifier")) if isinstance(verifier, FileVerifier)
                          else ("custom_verifier", "criteria_registry"))
         if not accepted:
             _record(state, "artifact_rejected", ", ".join(
@@ -125,6 +126,8 @@ def _prepare_start(path, *, approval, verifier, backend_scope, policy, approval_
         raise ValueError("Resume requires the original operator policy")
     state["policy_id"] = policy.identity
     saved_verifier = state.get("verifier_id")
+    if state.get("criteria_verifier_id") and not isinstance(verifier, CriteriaVerifier):
+        raise ValueError("Resume requires the original criteria verifier")
     if saved_verifier is not None and (not isinstance(verifier, FileVerifier) or saved_verifier != verifier.identity):
         raise ValueError("Resume requires the original artifact verifier")
     if isinstance(verifier, FileVerifier):
@@ -134,6 +137,9 @@ def _prepare_start(path, *, approval, verifier, backend_scope, policy, approval_
         if state.get("artifact_baseline") is not None:
             raise ValueError("Resume requires the original artifact verifier")
         verifier.prepare(state)
+        if state.get("criteria_verifier_id", verifier.identity) != verifier.identity:
+            raise ValueError("Resume requires the original criteria verifier rules and revisions")
+        state["criteria_verifier_id"] = verifier.identity
     elif state.get("artifact_baseline") is not None:
         raise ValueError("Resume requires the original artifact verifier")
     if state.get("task_runtime"):
@@ -192,6 +198,8 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             approved = state["pending_approval"]
         state["pending_approval"] = None
     state.pop("approved_action", None)
+    if callable(getattr(verifier, "bind_backend", None)):
+        verifier.bind_backend(desktop)
     state["status"] = "running"
     if isinstance(verifier, (FileVerifier, CriteriaVerifier)):
         state["task_acceptance_catalog"] = list(verifier.rules)

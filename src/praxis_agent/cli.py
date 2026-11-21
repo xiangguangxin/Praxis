@@ -10,6 +10,7 @@ from .session import browser_scope, open_session
 from .state import create, load
 from .tool_trace import compare_checkpoints
 from .verification import FileVerifier
+from .verifiers.configured import load_verifier
 
 
 def main():
@@ -160,7 +161,7 @@ def main():
         elif args.command == "reconcile":
             result = reconcile(args.checkpoint, outcome=args.outcome, note=args.note)
         elif args.command == "verify":
-            result = FileVerifier.from_json(args.verifier).evaluate(load(args.checkpoint))
+            result = load_verifier(args.verifier).evaluate(load(args.checkpoint))
         else:
             result = _execute(args)
     except KeyboardInterrupt:
@@ -211,7 +212,7 @@ def _execute(args, execution_guard=None):
                            evolution_store=__import__("praxis_agent.evolution", fromlist=["EvolutionStore"]).EvolutionStore(args.evolution_store) if args.evolution_store else None,
                            evolution_environment=args.evolution_environment,
                            strategy_candidate_id=getattr(args, "strategy_candidate_id", None))
-    verifier = FileVerifier.from_json(args.verifier) if args.verifier else None
+    verifier = load_verifier(args.verifier) if args.verifier else None
     from .policy import fingerprint
     scope = (browser_scope(args.browser_url, download_dir) if args.browser_url else
              fingerprint({"nova": str(Path(args.nova).resolve())}))
