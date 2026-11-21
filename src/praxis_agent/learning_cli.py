@@ -11,6 +11,10 @@ from .storage import atomic_json_write
 def main():
     parser = argparse.ArgumentParser(description="Praxis failure mining and experience clustering")
     commands = parser.add_subparsers(dest="command", required=True)
+    outcomes = commands.add_parser("hint-outcomes", help="Report hint exposure and recorded run outcomes")
+    outcomes.add_argument("--checkpoints", type=Path, required=True)
+    outcomes.add_argument("--limit", type=int, default=1000)
+    outcomes.add_argument("--output", type=Path)
 
     failures = commands.add_parser("mine-failures", help="Aggregate trusted failure signatures from checkpoints")
     failures.add_argument("--checkpoints", type=Path, required=True)
@@ -28,7 +32,10 @@ def main():
     clusters.add_argument("--output", type=Path)
 
     args = parser.parse_args()
-    if args.command == "mine-failures":
+    if args.command == "hint-outcomes":
+        from .hint_tracking import hint_outcomes
+        result = hint_outcomes(args.checkpoints, limit=args.limit)
+    elif args.command == "mine-failures":
         result = mine_failure_patterns(args.checkpoints, recursive=args.recursive,
                                        min_occurrences=args.min_occurrences, limit=args.limit)
     else:

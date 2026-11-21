@@ -160,6 +160,9 @@ praxis run ./goal-state.json --nova /absolute/path/to/nova \
 
 Matching uses simple lexical overlap and exact environment tags, not embeddings.
 
+[Hint outcome tracking](docs/hint-outcomes.md) records actual exposure and supports
+idempotent, independently rechecked operator feedback without inferring causal credit.
+
 ### Failure mining and experience clustering
 
 Praxis includes offline, deterministic learning analytics. Failure mining scans saved checkpoints and groups trusted runtime failure signatures; it reports recurrence and source checkpoint IDs, but does not claim that frequency proves a root cause. Experience clustering considers only active, independently verified entries and keeps environments separate. It uses weighted lexical Jaccard similarity with complete-link assignment, so every pair in a cluster meets the configured threshold. No embedding provider or model call is required.

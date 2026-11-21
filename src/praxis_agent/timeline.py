@@ -39,6 +39,7 @@ def timeline(checkpoint, *, journal=None):
             "journal_error": state.get("journal_error"),
             "tasks": {safe_summary(key, 80): value for key, value in task_data.get("graph", {}).get("status", {}).items()},
             "models": state.get("model_requests", []),
+            "hints": state.get("hint_exposures", []),
             "tools": [{"tool": safe_summary(item.get("tool", ""), 128), "outcome": item.get("outcome"),
                        "duration_ms": item.get("duration_ms")} for item in trace.get("events", [])],
             "trace_dropped": trace.get("dropped", 0)}
@@ -58,7 +59,7 @@ def write_timeline(checkpoint, output, *, journal=None):
                         '</td><td>'+escape(event["detail"])+'</td></tr>')
         panels = "".join('<section><h2>'+escape(name)+'</h2><pre>'+escape(json.dumps(report[key], ensure_ascii=False, indent=2))+"</pre></section>"
                          for name, key in [("Model usage", "model_usage"), ("Task states", "tasks"),
-                                           ("Model requests", "models"), ("Tool outcomes", "tools")])
+                                           ("Model requests", "models"), ("Tool outcomes", "tools"), ("Hint exposure", "hints")])
         html = '''<!doctype html><html lang="en"><meta charset="utf-8"><title>Praxis run timeline</title>
 <style>body{font:15px system-ui;background:#f5f6fa;color:#17243b;margin:32px auto;max-width:1200px}header,section{background:white;border:1px solid #dce2ec;border-radius:12px;padding:24px;margin:16px 0}h1{margin:0}small{color:#52627b}input,select{padding:10px;font:inherit;margin:12px 12px 12px 0}table{border-collapse:collapse;width:100%;text-align:left}td,th{padding:12px;border-bottom:1px solid #edf0f5}pre{white-space:pre-wrap;overflow-wrap:anywhere}.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}</style>
 <header><h1>Praxis run timeline</h1><p>''' + escape(report["run_id"]) + " · " + escape(report["status"]) + " · " + escape(report["verification_level"] or "unverified") + '''</p><small>Read-only inspection. No tools or model calls are replayed.</small></header>
