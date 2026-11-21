@@ -1,4 +1,5 @@
 import io
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -16,7 +17,7 @@ class ConfiguredVerifierTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             (root / "report.txt").write_text("PASS", encoding="utf-8")
-            with sqlite3.connect(root / "app.db") as db:
+            with closing(sqlite3.connect(root / "app.db")) as db, db:
                 db.execute("create table jobs(status text)")
                 db.execute("insert into jobs values ('complete')")
             rules = {"file": {"path": "report.txt", "contains": "PASS"},
