@@ -1,0 +1,5 @@
+{
+  "root": ".",
+  "files": {"read": true, "write_json": true},
+  "commands": [{"name": "python_version", "argv": ["python", "--version"], "timeout_seconds": 10}]
+}

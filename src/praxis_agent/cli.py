@@ -66,6 +66,7 @@ def main():
     backend = worker.add_mutually_exclusive_group(required=True)
     backend.add_argument("--nova")
     backend.add_argument("--browser-url")
+    backend.add_argument("--tool-config", type=Path)
     worker.add_argument("--download-dir", type=Path)
     worker.add_argument("--browser-executable")
     add_model_arguments(worker)
@@ -105,6 +106,7 @@ def main():
         backend = execution.add_mutually_exclusive_group(required=True)
         backend.add_argument("--nova")
         backend.add_argument("--browser-url", help="Start URL for an isolated Chromium browser")
+        backend.add_argument("--tool-config", type=Path, help="Operator-configured file, HTTP, command and MCP tools")
         execution.add_argument("--download-dir", type=Path, help="Existing directory for new browser downloads")
         execution.add_argument("--browser-executable")
         add_model_arguments(execution)
@@ -226,11 +228,17 @@ def _execute(args, execution_guard=None):
                            strategy_candidate_id=getattr(args, "strategy_candidate_id", None), **request_options(args))
     verifier = load_verifier(args.verifier) if args.verifier else None
     from .policy import fingerprint
-    scope = (browser_scope(args.browser_url, download_dir) if args.browser_url else
-             fingerprint({"nova": str(Path(args.nova).resolve())}))
+    tool_config = getattr(args, "tool_config", None)
+    if tool_config:
+        from .adapters.tool_backend import config_identity
+        scope = config_identity(tool_config)
+    else:
+        scope = (browser_scope(args.browser_url, download_dir) if args.browser_url else
+                 fingerprint({"nova": str(Path(args.nova).resolve())}))
     policy = ActionPolicy.from_json(args.policy) if args.policy else ActionPolicy()
     factory = lambda: open_session(planner, nova=args.nova, browser_url=args.browser_url,
-                                   download_dir=download_dir, browser_executable=args.browser_executable)
+                                   download_dir=download_dir, browser_executable=args.browser_executable,
+                                   tool_config=tool_config, expected_backend_scope=scope if tool_config else None)
     return run_session(args.checkpoint, factory, planner, approval=args.approve_pending,
                        verifier=verifier, backend_scope=scope, trace_tools=args.trace_tools,
                        policy=policy, approval_id=args.approval_id, execution_guard=execution_guard,
