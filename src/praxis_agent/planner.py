@@ -149,14 +149,14 @@ class ModelPlanner:
         return profile.model,key,profile.endpoint,profile.name
 
     def _request(self,messages,*,vision=False,risk="low",max_tokens=None,task_type="general"):
-        model,key,endpoint,route=self._route(vision,risk,task_type)
+        model,api_key,endpoint,route=self._route(vision,risk,task_type)
         for label in ("task_" + task_type, "profile_" + route):
-            key = "route_" + label + "_calls"
-            self.usage[key] = self.usage.get(key, 0) + 1
+            metric_key = "route_" + label + "_calls"
+            self.usage[metric_key] = self.usage.get(metric_key, 0) + 1
         payload={"model":model,"messages":messages,"temperature":0,"response_format":{"type":"json_object"}}
         if max_tokens: payload["max_tokens"]=max_tokens
         request=urllib.request.Request(endpoint,data=json.dumps(payload).encode(),
-            headers={"Content-Type":"application/json","Authorization":"Bearer "+key},method="POST")
+            headers={"Content-Type":"application/json","Authorization":"Bearer "+api_key},method="POST")
         self.usage["calls"]+=1
         try:
             with urllib.request.urlopen(request,timeout=90) as response: result=json.load(response)
