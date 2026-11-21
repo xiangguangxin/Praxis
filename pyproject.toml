@@ -16,6 +16,7 @@ dependencies = ["jsonschema>=4.23,<5"]
 
 [project.optional-dependencies]
 browser = ["playwright>=1.49,<2"]
+visual = ["Pillow>=10,<13"]
 
 [project.scripts]
 praxis = "praxis_agent.cli:main"

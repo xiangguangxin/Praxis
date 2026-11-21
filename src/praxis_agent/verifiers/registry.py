@@ -1,15 +1,21 @@
 """Independent acceptance registry; does not trust model-provided completion."""
+import json
+from ..policy import fingerprint
 class VerificationError(ValueError):
     pass
 
 class VerificationRegistry:
     def __init__(self):
         self._checks = {}
+        self._revisions = {}
 
-    def register(self, name, check):
+    def register(self, name, check, *, revision="1"):
         if not isinstance(name, str) or not name.strip() or not callable(check) or name in self._checks:
             raise VerificationError("Verifier must be unique and callable")
+        if not isinstance(revision, str) or not revision:
+            raise VerificationError("Explicit nonempty verifier revision required")
         self._checks[name] = check
+        self._revisions[name] = revision
 
     def evaluate(self, criteria):
         if not isinstance(criteria, dict) or not criteria:
@@ -37,7 +43,8 @@ class CriteriaVerifier:
     def __init__(self, registry, rules):
         if not isinstance(registry, VerificationRegistry) or not isinstance(rules, dict) or not rules:
             raise VerificationError("Registry and nonempty rules required")
-        self.registry, self.rules = registry, rules
+        self.registry, self.rules = registry, json.loads(json.dumps(rules, allow_nan=False))
+        self.identity = fingerprint([self.rules, registry._revisions])
 
     def prepare(self, state):
         criteria = state.get("criteria")

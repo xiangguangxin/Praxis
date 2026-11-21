@@ -106,6 +106,9 @@ The planner may assert completion; **without an independent verifier**, this is 
 Tasks can use trusted intermediate checks while final Goal criteria are verified
 separately. See [layered acceptance](docs/layered-acceptance.md).
 
+[Configured verifiers](docs/configured-verifiers.md) support DOM, HTTP JSON,
+read-only SQLite, application state, screenshot regions and local artifact checks.
+
 Use a trusted verifier rules file, mapped to the checkpoint criteria:
 
 ```bash
