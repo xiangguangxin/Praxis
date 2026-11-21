@@ -3,7 +3,7 @@ from __future__ import annotations
 import json, os, urllib.request
 from typing import Any
 from .planning import DynamicTaskPlanner
-class TokenBudgetExceeded(RuntimeError): pass
+from .request_runtime import ResilientRequests, TokenBudgetExceeded
 def _compact_tools(tools: list, limit=None) -> list:
     """Compact metadata without silently dropping tools by their list position."""
     compact = []
@@ -106,10 +106,11 @@ def _hint(item):
                          ("checkpoint_id", "verifier_id", "checked_at", "passed_checks") if key in evidence}}
 
 
-class ModelPlanner:
+class ModelPlanner(ResilientRequests):
     def __init__(self, model, api_key, endpoint, *, max_tokens=0, max_calls=0, max_text_chars=5000, max_images=1,
                  experience_store=None, experience_environment="", model_router=None,
-                 evolution_store=None, evolution_environment="", strategy_candidate_id=None):
+                 evolution_store=None, evolution_environment="", strategy_candidate_id=None, **request_settings):
+        self.configure_requests(**request_settings)
         self.model,self.api_key,self.endpoint=model,api_key,endpoint
         self.max_tokens,self.max_calls=max_tokens,max_calls
         self.max_text_chars,self.max_images=max_text_chars,max_images
@@ -139,42 +140,19 @@ class ModelPlanner:
             return "research"
         return "execution" if active else "planning"
 
-    def _route(self, vision, risk, task_type="general"):
+    def _route(self, vision, risk, task_type="general", *, exclude=()):
         if self.model_router is None: return self.model,self.api_key,self.endpoint,"default"
-        profile=self.model_router.select(task_type=task_type,requires_vision=vision,risk=risk)
+        profile=self.model_router.select(task_type=task_type,requires_vision=vision,risk=risk,exclude=exclude)
         key=os.getenv(profile.api_key_env)
         if not key: raise ValueError("Missing API key environment variable: "+profile.api_key_env)
         if self._last_route is not None and self._last_route!=profile.name: self.usage["route_switches"]+=1
         self._last_route=profile.name
         return profile.model,key,profile.endpoint,profile.name
 
-    def _request(self,messages,*,vision=False,risk="low",max_tokens=None,task_type="general"):
-        model,api_key,endpoint,route=self._route(vision,risk,task_type)
-        for label in ("task_" + task_type, "profile_" + route):
-            metric_key = "route_" + label + "_calls"
-            self.usage[metric_key] = self.usage.get(metric_key, 0) + 1
-        payload={"model":model,"messages":messages,"temperature":0,"response_format":{"type":"json_object"}}
-        if max_tokens: payload["max_tokens"]=max_tokens
-        request=urllib.request.Request(endpoint,data=json.dumps(payload).encode(),
-            headers={"Content-Type":"application/json","Authorization":"Bearer "+api_key},method="POST")
-        self.usage["calls"]+=1
-        try:
-            with urllib.request.urlopen(request,timeout=90) as response: result=json.load(response)
-        except (OSError,ValueError):
-            self.usage["usage_missing_calls"]+=1
-            raise
-        usage=result.get("usage",{})
-        if isinstance(usage,dict) and type(usage.get("prompt_tokens")) is int and usage["prompt_tokens"]>=0 and type(usage.get("completion_tokens")) is int and usage["completion_tokens"]>=0:
-            self.usage["input_tokens"]+=usage["prompt_tokens"]; self.usage["output_tokens"]+=usage["completion_tokens"]
-        else:
-            self.usage["usage_missing_calls"]+=1
-            self.usage["estimated_input_tokens"]+=max(1,len(json.dumps(messages,ensure_ascii=False))//4)
-        return json.loads(result["choices"][0]["message"]["content"])
-
     def _check_budget(self,state,messages):
         usage=state.get("model_usage",{})
         calls=int(usage.get("calls",0))
-        spent=sum(int(usage.get(k,0)) for k in ("input_tokens","output_tokens","estimated_input_tokens"))
+        spent=sum(int(usage.get(k,0)) for k in ("input_tokens","output_tokens","estimated_input_tokens","estimated_output_tokens"))
         estimate=max(1,len(json.dumps(messages,ensure_ascii=False))//4)
         if self.max_calls and calls>=self.max_calls: raise TokenBudgetExceeded("Model call budget exhausted")
         if self.max_tokens and self.max_tokens-spent<=estimate: raise TokenBudgetExceeded("Insufficient budget for next request")
@@ -227,7 +205,7 @@ class ModelPlanner:
 
     def decide(self,state,observation):
         previous=state.get("model_usage",{})
-        spent=sum(int(previous.get(k,0)) for k in ("input_tokens","output_tokens","estimated_input_tokens"))
+        spent=sum(int(previous.get(k,0)) for k in ("input_tokens","output_tokens","estimated_input_tokens","estimated_output_tokens"))
         if self.max_calls and int(previous.get("calls",0))>=self.max_calls: raise TokenBudgetExceeded("Model call budget exhausted")
         evidence=[]
         for item in observation.get("content",self.last_tool_content):

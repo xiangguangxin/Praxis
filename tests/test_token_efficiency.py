@@ -14,7 +14,7 @@ class Response:
         if usage is not None: self.payload["usage"] = usage
     def __enter__(self): return self
     def __exit__(self, *args): pass
-    def read(self): return json.dumps(self.payload).encode()
+    def read(self, size=-1): return json.dumps(self.payload).encode()
 
 class Desktop:
     def observe(self): return {"summary": "screen"}

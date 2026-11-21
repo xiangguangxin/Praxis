@@ -17,6 +17,7 @@ def safe_summary(value, limit=200):
 
 
 def error_detail(exc, phase, pending=False):
+    from .model_transport import ModelRequestError
     known = {
         "Missing acceptance evidence for one or more criteria": "acceptance_rejected",
         "Goal, criteria or tool directory exceed the context budget": "context_budget_exceeded",
@@ -24,6 +25,11 @@ def error_detail(exc, phase, pending=False):
         "Planner must choose act, discover, complete or pause": "invalid_planner_decision",
         "Action requires a name and argument object": "invalid_action",
     }
+    if isinstance(exc, ModelRequestError):
+        return {"code": exc.code, "phase": phase, "exception_type": type(exc).__name__,
+                "message": "Model request failed" + (f" (HTTP {exc.status})" if exc.status else ""),
+                "may_have_executed": pending, "retryable": exc.retryable and not pending,
+                "recovery": "Review model configuration or provider readiness; tool actions were not replayed."}
     if phase == "validation" and isinstance(getattr(exc, "code", None), str):
         code, message = exc.code, "Tool action rejected before dispatch"
     elif isinstance(exc, ValueError) and str(exc) in known:

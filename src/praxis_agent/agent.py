@@ -210,12 +210,23 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
         planner.usage.update(state.get("model_usage", {}))
     persist(path, state)
     discoveries = 0
+    run_started = time.monotonic()
+    previous_elapsed = state.get("elapsed_run_ms", 0)
+    run_limit = getattr(planner, "max_run_seconds", 0)
+    remaining = run_limit - previous_elapsed/1000 if run_limit else None
+    if remaining is not None and callable(getattr(planner, "set_run_deadline", None)):
+        planner.set_run_deadline(remaining)
+    def check_deadline():
+        if remaining is not None and time.monotonic()-run_started >= remaining:
+            raise TokenBudgetExceeded("Run deadline exhausted")
     while True:
         phase = "observation"
         try:
+            check_deadline()
             if execution_guard is not None:
                 execution_guard.raise_if_lost()
             observation = normalize(desktop.observe())
+            check_deadline()
             failure_analysis = analyze_failure(state)
             if failure_analysis is not None:
                 if state.get("failure_analysis") != failure_analysis:
@@ -401,6 +412,7 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                 _pause(state, "no_progress")
                 break
             # Write-ahead checkpoint: after crash, never replay this action blindly.
+            check_deadline()
             state["pending_action"] = {"name": action["name"], "since": time.time()}
             event = tool_trace.begin(state, action["name"], observation.get("tools"))
             persist(path, state)
@@ -442,8 +454,8 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                 _pause(state, "lease_lost")
                 _record(state, "lease_lost", "stopped before the next action")
             break
-        except TokenBudgetExceeded:
-            _pause(state, "model_budget_exhausted")
+        except TokenBudgetExceeded as exc:
+            _pause(state, "run_budget_exhausted" if "deadline" in str(exc).lower() else "model_budget_exhausted")
             break
         except KeyboardInterrupt:
             if state.get("pending_action"):
@@ -460,10 +472,11 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             state["failure_analysis"] = analyze_failure(state)
             _record(state, "failure_analyzed", state["failure_analysis"]["category"])
             _record(state, "error", f"{phase}: {detail['code']}")
-            if state["pending_action"] or state["failures"] >= 3:
+            if state["pending_action"] or state["failures"] >= 3 or not detail["retryable"]:
                 state["status"] = "blocked"
                 state["stop_reason"] = "reconciliation_required" if state["pending_action"] else "retry_required"
                 break
         finally:
+            state["elapsed_run_ms"] = previous_elapsed + max(0, round((time.monotonic()-run_started)*1000))
             persist(path, state)
     return persist(path, state)

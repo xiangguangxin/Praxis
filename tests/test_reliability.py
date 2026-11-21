@@ -41,7 +41,7 @@ class OneAction:
 class Response:
     def __enter__(self): return self
     def __exit__(self, *a): pass
-    def read(self):
+    def read(self, size=-1):
         return json.dumps({"choices": [{"message": {"content": '{"type":"pause"}'}}],
                            "usage": {"prompt_tokens": 20, "completion_tokens": 5}}).encode()
 
