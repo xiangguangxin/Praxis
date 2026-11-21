@@ -1,0 +1,196 @@
+{
+  "scenarios": [
+    {
+      "name": "customer",
+      "start_path": "?task=customer",
+      "goal": "Complete the task described in this authorized local acceptance workspace. Follow the displayed instructions including any validation or recovery steps. Download the resulting report as report.json in {output_dir}.",
+      "max_steps": 18,
+      "rules": {
+        "Task report verified": {
+          "path": "report.json",
+          "fresh": true,
+          "json_fields": {
+            "/task": "customer",
+            "/value": "Alice"
+          }
+        }
+      }
+    },
+    {
+      "name": "unicode",
+      "start_path": "?task=unicode",
+      "goal": "Complete the task described in this authorized local acceptance workspace. Follow the displayed instructions including any validation or recovery steps. Download the resulting report as report.json in {output_dir}.",
+      "max_steps": 18,
+      "rules": {
+        "Task report verified": {
+          "path": "report.json",
+          "fresh": true,
+          "json_fields": {
+            "/task": "unicode",
+            "/value": "西安研发"
+          }
+        }
+      }
+    },
+    {
+      "name": "quantity",
+      "start_path": "?task=quantity",
+      "goal": "Complete the task described in this authorized local acceptance workspace. Follow the displayed instructions including any validation or recovery steps. Download the resulting report as report.json in {output_dir}.",
+      "max_steps": 18,
+      "rules": {
+        "Task report verified": {
+          "path": "report.json",
+          "fresh": true,
+          "json_fields": {
+            "/task": "quantity",
+            "/value": 14
+          }
+        }
+      }
+    },
+    {
+      "name": "trim",
+      "start_path": "?task=trim",
+      "goal": "Complete the task described in this authorized local acceptance workspace. Follow the displayed instructions including any validation or recovery steps. Download the resulting report as report.json in {output_dir}.",
+      "max_steps": 18,
+      "rules": {
+        "Task report verified": {
+          "path": "report.json",
+          "fresh": true,
+          "json_fields": {
+            "/task": "trim",
+            "/value": "Alpha"
+          }
+        }
+      }
+    },
+    {
+      "name": "uppercase",
+      "start_path": "?task=uppercase",
+      "goal": "Complete the task described in this authorized local acceptance workspace. Follow the displayed instructions including any validation or recovery steps. Download the resulting report as report.json in {output_dir}.",
+      "max_steps": 18,
+      "rules": {
+        "Task report verified": {
+          "path": "report.json",
+          "fresh": true,
+          "json_fields": {
+            "/task": "uppercase",
+            "/value": "PRAXIS"
+          }
+        }
+      }
+    },
+    {
+      "name": "confirm",
+      "start_path": "?task=confirm",
+      "goal": "Complete the task described in this authorized local acceptance workspace. Follow the displayed instructions including any validation or recovery steps. Download the resulting report as report.json in {output_dir}.",
+      "max_steps": 18,
+      "rules": {
+        "Task report verified": {
+          "path": "report.json",
+          "fresh": true,
+          "json_fields": {
+            "/task": "confirm",
+            "/value": "approved"
+          }
+        }
+      }
+    },
+    {
+      "name": "region",
+      "start_path": "?task=region",
+      "goal": "Complete the task described in this authorized local acceptance workspace. Follow the displayed instructions including any validation or recovery steps. Download the resulting report as report.json in {output_dir}.",
+      "max_steps": 18,
+      "rules": {
+        "Task report verified": {
+          "path": "report.json",
+          "fresh": true,
+          "json_fields": {
+            "/task": "region",
+            "/value": "West"
+          }
+        }
+      }
+    },
+    {
+      "name": "wizard",
+      "start_path": "?task=wizard",
+      "goal": "Complete the task described in this authorized local acceptance workspace. Follow the displayed instructions including any validation or recovery steps. Download the resulting report as report.json in {output_dir}.",
+      "max_steps": 18,
+      "rules": {
+        "Task report verified": {
+          "path": "report.json",
+          "fresh": true,
+          "json_fields": {
+            "/task": "wizard",
+            "/value": "step-one"
+          }
+        }
+      }
+    },
+    {
+      "name": "filter",
+      "start_path": "?task=filter",
+      "goal": "Complete the task described in this authorized local acceptance workspace. Follow the displayed instructions including any validation or recovery steps. Download the resulting report as report.json in {output_dir}.",
+      "max_steps": 18,
+      "rules": {
+        "Task report verified": {
+          "path": "report.json",
+          "fresh": true,
+          "json_fields": {
+            "/task": "filter",
+            "/value": "delta"
+          }
+        }
+      }
+    },
+    {
+      "name": "delay",
+      "start_path": "?task=delay",
+      "goal": "Complete the task described in this authorized local acceptance workspace. Follow the displayed instructions including any validation or recovery steps. Download the resulting report as report.json in {output_dir}.",
+      "max_steps": 18,
+      "rules": {
+        "Task report verified": {
+          "path": "report.json",
+          "fresh": true,
+          "json_fields": {
+            "/task": "delay",
+            "/value": "ready"
+          }
+        }
+      }
+    },
+    {
+      "name": "retry",
+      "start_path": "?task=retry",
+      "goal": "Complete the task described in this authorized local acceptance workspace. Follow the displayed instructions including any validation or recovery steps. Download the resulting report as report.json in {output_dir}.",
+      "max_steps": 18,
+      "rules": {
+        "Task report verified": {
+          "path": "report.json",
+          "fresh": true,
+          "json_fields": {
+            "/task": "retry",
+            "/value": "ready"
+          }
+        }
+      }
+    },
+    {
+      "name": "validation",
+      "start_path": "?task=validation",
+      "goal": "Complete the task described in this authorized local acceptance workspace. Follow the displayed instructions including any validation or recovery steps. Download the resulting report as report.json in {output_dir}.",
+      "max_steps": 18,
+      "rules": {
+        "Task report verified": {
+          "path": "report.json",
+          "fresh": true,
+          "json_fields": {
+            "/task": "validation",
+            "/value": 7
+          }
+        }
+      }
+    }
+  ]
+}

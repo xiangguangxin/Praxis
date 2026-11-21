@@ -1,0 +1,6 @@
+{
+  "rules": [
+    {"tool": "browser_download", "arguments": {"role": "button", "name": "Export report", "filename": "report.json"}, "effect": "allow"},
+    {"tool": "browser_click", "arguments": {"role": "button", "name": "Export report"}, "effect": "allow"}
+  ]
+}

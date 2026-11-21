@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Praxis acceptance fixture</title>
+<style>body{font:18px system-ui;max-width:720px;margin:60px auto}input,button{font:inherit;margin:12px;padding:10px}#message{padding:20px;background:#eef}</style>
+<h1>Resettable acceptance workspace</h1><p id="instruction"></p>
+<label id="field">Value <input id="value" aria-label="Value"></label>
+<button id="special" hidden></button><button id="prepare" hidden>Prepare report</button>
+<button id="next" hidden>Next step</button><button id="export">Export report</button>
+<p id="message" role="status">Ready for input</p>
+<script>
+const task=new URLSearchParams(location.search).get('task')||'customer';
+const instructions={customer:'Enter Alice and export.',unicode:'Enter 西安研发 and export.',quantity:'Enter 7; export twice that quantity.',trim:'Enter two spaces, Alpha, two spaces; export the trimmed value.',uppercase:'Enter praxis; export uppercase.',confirm:'Enter approved; confirm consent, then export.',region:'Enter report; select Region West, then export.',wizard:'Enter step-one; advance to the next step, then export.',filter:'Search for delta; select the matching result, then export.',delay:'Prepare the report, wait until it is ready, then export.',retry:'Prepare the report; recover from the first temporary error and export.',validation:'Enter zero and try export; correct the validation error with 7, then export.'};
+const field=document.querySelector('#field'),input=document.querySelector('#value'),special=document.querySelector('#special'),prepare=document.querySelector('#prepare'),next=document.querySelector('#next'),output=document.querySelector('#export'),message=document.querySelector('#message');
+document.querySelector('#instruction').textContent=instructions[task]||'Unknown task';
+let confirmed=false,region='',advanced=false,selected=false,ready=false,attempts=0;
+if(['confirm','region','filter'].includes(task)){special.hidden=false;special.textContent={confirm:'Confirm consent',region:'Region West',filter:'Select delta'}[task];special.onclick=()=>{confirmed=true;region='West';selected=input.value==='delta';message.textContent='Selection recorded';};}
+if(task==='wizard'){next.hidden=false;next.onclick=()=>{advanced=true;message.textContent='Step two ready';};}
+if(['delay','retry'].includes(task)){field.hidden=true;prepare.hidden=false;prepare.onclick=()=>{attempts++;if(task==='retry'&&attempts===1){message.textContent='Temporary error. Prepare again.';return;}message.textContent='Preparing';setTimeout(()=>{ready=true;message.textContent='Report ready';},350);};}
+output.onclick=()=>{
+ if(task==='confirm'&&!confirmed){message.textContent='Confirm consent first';return;}
+ if(task==='region'&&!region){message.textContent='Select Region West first';return;}
+ if(task==='wizard'&&!advanced){message.textContent='Advance to step two first';return;}
+ if(task==='filter'&&!selected){message.textContent='Select the matching delta result';return;}
+ if(['delay','retry'].includes(task)&&!ready){message.textContent='Report is not ready';return;}
+ if(task==='validation'&&Number(input.value)<=0){message.textContent='Validation error: enter a positive quantity';return;}
+ let value=input.value;
+ if(task==='quantity')value=Number(value)*2;
+ if(task==='trim')value=value.trim();
+ if(task==='uppercase')value=value.toUpperCase();
+ if(task==='region')value=region;
+ if(task==='filter')value='delta';
+ if(['delay','retry'].includes(task))value='ready';
+ if(task==='validation')value=Number(value);
+ const blob=new Blob([JSON.stringify({task,value})],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);message.textContent='Report exported';
+};
+</script></html>

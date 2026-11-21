@@ -171,6 +171,10 @@ modes and independent verification references; these remain untrusted planning h
 
 ## Benchmark & evaluation
 
+The [twelve-task live acceptance suite](docs/live-benchmark-suite.md) includes
+resettable browser tasks and independently checked outputs, with latency,
+false-completion and statistical uncertainty metrics.
+
 ```bash
 praxis-benchmark examples/benchmark-suite.json
 python -m unittest discover -s tests -v
