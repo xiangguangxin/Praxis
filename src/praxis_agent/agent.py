@@ -21,6 +21,11 @@ from .scheduler import LeaseLost
 APPROVAL_TTL = 600
 
 
+def _task_runtime(state, verifier, *, data=None):
+    catalog = list(verifier.rules) if isinstance(verifier, (FileVerifier, CriteriaVerifier)) else state["criteria"]
+    return TaskPlanRuntime(state.get("task_plan"), state["criteria"], data=data, available_criteria=catalog)
+
+
 def run(path: Path, desktop, planner, *, approval: bool = False, verifier=None,
         backend_scope=None, trace_tools: bool = False, policy=None, approval_id=None) -> dict[str, Any]:
     with checkpoint_lock(path):
@@ -134,7 +139,7 @@ def _prepare_start(path, *, approval, verifier, backend_scope, policy, approval_
     if state.get("task_runtime"):
         if not isinstance(verifier, (FileVerifier, CriteriaVerifier)):
             raise ValueError("Resuming task-orchestrated goals requires the original independent verifier")
-        TaskPlanRuntime(state.get("task_plan"), state["criteria"], data=state["task_runtime"])
+        _task_runtime(state, verifier, data=state["task_runtime"])
     if approval_id is not None and (not approval or approval_id != state.get("pending_approval")):
         raise ValueError("Approval ID does not match the pending request")
     return state, True
@@ -188,6 +193,8 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
         state["pending_approval"] = None
     state.pop("approved_action", None)
     state["status"] = "running"
+    if isinstance(verifier, (FileVerifier, CriteriaVerifier)):
+        state["task_acceptance_catalog"] = list(verifier.rules)
     state.pop("stop_reason", None)
     if trace_tools:
         tool_trace.enable(state)
@@ -217,8 +224,7 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                 phase = "verification"
                 task_status = None
                 if state.get("task_runtime"):
-                    task_status = TaskPlanRuntime(state["task_plan"], state["criteria"],
-                                                  data=state["task_runtime"]).status
+                    task_status = _task_runtime(state, verifier, data=state["task_runtime"]).status
                 if task_status == "blocked":
                     state["status"], state["stop_reason"] = "blocked", "task_plan_blocked"
                     _record(state, "task_plan_blocked", "Task retry budget exhausted")
@@ -246,7 +252,7 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                             state["model_usage"] = dict(planner.usage)
                     if isinstance(verifier, (FileVerifier, CriteriaVerifier)) and not state.get("task_runtime"):
                         try:
-                            task_runtime = TaskPlanRuntime(state["task_plan"], state["criteria"])
+                            task_runtime = _task_runtime(state, verifier)
                         except TaskRuntimeError as exc:
                             state["task_plan_mode"] = "advisory"
                             _record(state, "task_plan_advisory", str(exc))
@@ -258,7 +264,7 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             task_runtime = None
             active_task = None
             if state.get("task_runtime"):
-                task_runtime = TaskPlanRuntime(state["task_plan"], state["criteria"], data=state["task_runtime"])
+                task_runtime = _task_runtime(state, verifier, data=state["task_runtime"])
                 active_task = task_runtime.active()
                 if active_task is not None:
                     _prepare_task_verification(state, active_task, task_runtime, verifier)
