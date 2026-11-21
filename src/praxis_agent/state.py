@@ -87,8 +87,16 @@ def persist(path: Path, state: dict[str, Any]) -> dict[str, Any]:
 
 def _record(state: dict[str, Any], event: str, detail: Any = None) -> None:
     # No raw screenshots, control trees, credentials, or action payloads on disk.
-    state["history"].append({"time": time.time(), "event": event,
+    state["event_sequence"] = state.get("event_sequence", len(state["history"])) + 1
+    state["history"].append({"time": time.time(), "event": event, "sequence": state["event_sequence"],
                              "detail": str(detail or "")[:160]})
     state["history"] = state["history"][-100:]
+    if state.get("event_journal"):
+        try:
+            from .observability import EventJournal
+            EventJournal(state["event_journal"]).emit("runtime_event", run_id=state["id"],
+                status=event, sequence=state["event_sequence"], counters={"tool_calls": state["steps"]})
+        except (OSError, ValueError):
+            state["journal_error"] = "event_journal_unavailable"
 
 

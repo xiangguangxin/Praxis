@@ -24,6 +24,10 @@ def main():
     goal.add_argument("--criterion", action="append", required=True)
     goal.add_argument("--max-steps", type=int, default=40)
     commands.add_parser("status").add_argument("checkpoint", type=Path)
+    inspection = commands.add_parser("timeline", help="Export a read-only run timeline as HTML or JSON")
+    inspection.add_argument("checkpoint", type=Path)
+    inspection.add_argument("--output", type=Path, required=True)
+    inspection.add_argument("--journal", type=Path)
     comparison = commands.add_parser("compare-traces", help="Find the first recorded checkpoint difference")
     comparison.add_argument("baseline", type=Path)
     comparison.add_argument("candidate", type=Path)
@@ -69,6 +73,7 @@ def main():
     worker.add_argument("--model-profiles", type=Path)
     worker.add_argument("--verifier", type=Path)
     worker.add_argument("--trace-tools", action="store_true")
+    worker.add_argument("--journal", type=Path)
     worker.add_argument("--policy", type=Path)
     worker.add_argument("--max-model-calls", type=int, default=0)
     worker.add_argument("--max-model-tokens", type=int, default=0)
@@ -120,6 +125,7 @@ def main():
         execution.add_argument("--evolution-environment", default="")
         execution.add_argument("--strategy-candidate-id", help="Preview an unpromoted strategy for paired evaluation only")
         execution.add_argument("--model-profiles", type=Path)
+        execution.add_argument("--journal", type=Path)
 
     args = parser.parse_args()
     try:
@@ -159,6 +165,9 @@ def main():
             result = retry(args.checkpoint, note=args.note, max_steps=args.max_steps)
         elif args.command == "status":
             result = load(args.checkpoint)
+        elif args.command == "timeline":
+            from .timeline import write_timeline
+            result = write_timeline(args.checkpoint, args.output, journal=args.journal)
         elif args.command == "compare-traces":
             result = compare_checkpoints(load(args.baseline), load(args.candidate))
         elif args.command == "reconcile":
@@ -224,7 +233,8 @@ def _execute(args, execution_guard=None):
                                    download_dir=download_dir, browser_executable=args.browser_executable)
     return run_session(args.checkpoint, factory, planner, approval=args.approve_pending,
                        verifier=verifier, backend_scope=scope, trace_tools=args.trace_tools,
-                       policy=policy, approval_id=args.approval_id, execution_guard=execution_guard)
+                       policy=policy, approval_id=args.approval_id, execution_guard=execution_guard,
+                       journal=getattr(args, "journal", None))
 
 
 if __name__ == "__main__":

@@ -121,6 +121,9 @@ The local file verifier supports safe root-constrained paths, minimum size, cont
 
 ## Review and recovery
 
+Use the [read-only run timeline](docs/run-timeline.md) to inspect observation IDs,
+model batches, tool outcomes, task states and recovery events as HTML or JSON.
+
 [Model request controls](docs/model-resilience.md) add bounded provider retries,
 capability-preserving failover, endpoint circuits, cost accounting and resumable
 run deadlines. Tool reconciliation and approval gates remain enforced.

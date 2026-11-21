@@ -27,11 +27,11 @@ def _task_runtime(state, verifier, *, data=None):
 
 
 def run(path: Path, desktop, planner, *, approval: bool = False, verifier=None,
-        backend_scope=None, trace_tools: bool = False, policy=None, approval_id=None) -> dict[str, Any]:
+        backend_scope=None, trace_tools: bool = False, policy=None, approval_id=None, journal=None) -> dict[str, Any]:
     with checkpoint_lock(path):
         return _run_locked(path, desktop, planner, approval=approval, verifier=verifier,
                            backend_scope=backend_scope, trace_tools=trace_tools,
-                           policy=policy or ActionPolicy(), approval_id=approval_id)
+                           policy=policy or ActionPolicy(), approval_id=approval_id, journal=journal)
 
 
 def _verify(state, verifier, evidence, observation):
@@ -153,7 +153,7 @@ def _prepare_start(path, *, approval, verifier, backend_scope, policy, approval_
 
 def run_session(path: Path, session_factory, planner, *, approval=False, verifier=None,
                 backend_scope=None, trace_tools=False, policy=None, approval_id=None,
-                execution_guard=None):
+                execution_guard=None, journal=None):
     """Validate and bind configuration while locked, before launching any backend."""
     policy = policy or ActionPolicy()
     options = dict(approval=approval, verifier=verifier, backend_scope=backend_scope,
@@ -166,7 +166,7 @@ def run_session(path: Path, session_factory, planner, *, approval=False, verifie
         try:
             with session_factory() as backend:
                 return _run_locked(path, backend, planner, trace_tools=trace_tools, state=state,
-                                   execution_guard=execution_guard, **options)
+                                   execution_guard=execution_guard, journal=journal, **options)
         except KeyboardInterrupt:
             if not state.get("pending_action") and state["status"] != "completed":
                 _pause(state, "interrupted")
@@ -181,14 +181,42 @@ def run_session(path: Path, session_factory, planner, *, approval=False, verifie
             return persist(path, state)
 
 
+def _invoke_model(state, planner, method, observation):
+    before = dict(getattr(planner, "usage", {}))
+    started, succeeded = time.monotonic(), False
+    try:
+        result = getattr(planner, method)(state.copy(), observation)
+        succeeded = True
+        return result
+    finally:
+        usage = dict(getattr(planner, "usage", {}))
+        if hasattr(planner, "usage"): state["model_usage"] = usage
+        calls = usage.get("calls", 0)-before.get("calls", 0)
+        if calls > 0:
+            requests = state.setdefault("model_requests", [])
+            requests.append({"method": method, "calls": calls, "succeeded": succeeded,
+                "duration_ms": round((time.monotonic()-started)*1000),
+                "routes": {safe_summary(k, 128): v-before.get(k, 0) for k, v in usage.items()
+                           if k.startswith("route_profile_") and v > before.get(k, 0)},
+                "input_tokens": usage.get("input_tokens", 0)-before.get("input_tokens", 0),
+                "output_tokens": usage.get("output_tokens", 0)-before.get("output_tokens", 0)})
+            if len(requests) > 128:
+                requests.pop(0)
+                state["model_requests_dropped"] = state.get("model_requests_dropped", 0)+1
+            _record(state, "model_request", method)
+
+
 def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, trace_tools, policy, approval_id,
-                state=None, execution_guard=None):
+                state=None, execution_guard=None, journal=None):
     if state is None:
         state, ready = _prepare_start(path, approval=approval, verifier=verifier, backend_scope=backend_scope,
                                       policy=policy, approval_id=approval_id)
         if not ready:
             return state
     approved = None
+    if journal is not None:
+        state["event_journal"] = str(Path(journal).resolve())
+    _record(state, "run_started" if not state.get("steps") else "checkpoint_resumed")
     if approval and state["pending_approval"]:
         pending = state.get("pending_review")
         if approval_id is not None and approval_id != state["pending_approval"]:
@@ -226,6 +254,7 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
             if execution_guard is not None:
                 execution_guard.raise_if_lost()
             observation = normalize(desktop.observe())
+            _record(state, "observation", observation["observation_id"])
             check_deadline()
             failure_analysis = analyze_failure(state)
             if failure_analysis is not None:
@@ -260,7 +289,7 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                 if should_plan or (failed_since_plan and not state.get("task_runtime")
                                    and state.get("task_plan_replans", 0) < 3):
                     try:
-                        state["task_plan"] = planner.prepare_plan(state.copy(), observation)
+                        state["task_plan"] = _invoke_model(state, planner, "prepare_plan", observation)
                         state["task_plan_at_step"] = state["steps"]
                         if not should_plan:
                             state["task_plan_replans"] = state.get("task_plan_replans", 0) + 1
@@ -299,7 +328,7 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                 state["task_runtime"] = task_runtime.to_dict()
                 persist(path, state)
             try:
-                decision = planner.decide(state.copy(), observation)
+                decision = _invoke_model(state, planner, "decide", observation)
             finally:
                 if hasattr(planner, "usage"):
                     state["model_usage"] = dict(planner.usage)
@@ -335,7 +364,7 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                         state["task_runtime"] = task_runtime.to_dict()
                         state["active_task"] = None
                         try:
-                            revised = planner.replan_tasks(state.copy(), observation)
+                            revised = _invoke_model(state, planner, "replan_tasks", observation)
                             task_runtime.replace_remaining(revised)
                             state["task_plan"] = revised
                             state["task_plan_replans"] = state.get("task_plan_replans", 0) + 1
