@@ -85,15 +85,17 @@ class ModelResilienceTests(unittest.TestCase):
         with self.assertRaises(TokenBudgetExceeded): planner._request([])
 
     def test_deadline_never_dispatches_tool_after_slow_observation(self):
+        clock = [100.0]
         class Backend:
             def observe(self):
-                time.sleep(.01)
+                clock[0] += .1
                 return {"summary": "ready"}
             def act(self, action): raise AssertionError("Tool must not dispatch")
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "state.json"
             create(path, "Inspect", ["ready"])
-            result = run(path, Backend(), self.planner(max_run_seconds=.001))
+            with patch("time.monotonic", side_effect=lambda: clock[0]):
+                result = run(path, Backend(), self.planner(max_run_seconds=.05))
             self.assertEqual(result["stop_reason"], "run_budget_exhausted")
             self.assertIsNone(result["pending_action"])
             self.assertGreater(result["elapsed_run_ms"], 0)

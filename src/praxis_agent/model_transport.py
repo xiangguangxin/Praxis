@@ -81,5 +81,5 @@ class ModelTransport:
             delay = min(self.policy.max_delay, max(delay if math.isfinite(delay) else 0,
                                                   self.policy.base_delay * 2**attempt))
             if deadline is not None and time.monotonic() + delay >= deadline:
-                raise RequestBudgetExceeded("Insufficient time for provider retry")
+                raise RequestBudgetExceeded("Run deadline prevents provider retry")
             time.sleep(delay)
