@@ -30,6 +30,10 @@ Praxis is a **goal-driven agent execution runtime** extracted from [OpenAS](http
 
 ## Quick start
 
+[Durable context memory](docs/context-memory.md) retains task progress, historical
+evidence references and failed approaches across resume while preserving goals
+and active acceptance contracts during structured context packing.
+
 Requires **Python 3.10+**, an authorized tool backend, and a separately configured multimodal model endpoint for live execution.
 
 ```bash

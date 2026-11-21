@@ -17,6 +17,8 @@ from . import tool_trace
 from .planning import TaskPlanRuntime, TaskRuntimeError
 from .failure_analysis import analyze_failure
 from .scheduler import LeaseLost
+from .context import ContextBudgetError
+from .context_memory import refresh_memory
 
 APPROVAL_TTL = 600
 
@@ -182,6 +184,7 @@ def run_session(path: Path, session_factory, planner, *, approval=False, verifie
 
 
 def _invoke_model(state, planner, method, observation):
+    refresh_memory(state)
     before = dict(getattr(planner, "usage", {}))
     started, succeeded = time.monotonic(), False
     try:
@@ -490,6 +493,9 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                 _pause(state, "lease_lost")
                 _record(state, "lease_lost", "stopped before the next action")
             break
+        except ContextBudgetError:
+            _pause(state, "context_budget_exhausted")
+            break
         except TokenBudgetExceeded as exc:
             _pause(state, "run_budget_exhausted" if "deadline" in str(exc).lower() else "model_budget_exhausted")
             break
@@ -514,5 +520,9 @@ def _run_locked(path, desktop, planner, *, approval, verifier, backend_scope, tr
                 break
         finally:
             state["elapsed_run_ms"] = previous_elapsed + max(0, round((time.monotonic()-run_started)*1000))
+            try:
+                refresh_memory(state)
+            except ValueError:
+                state["context_memory_error"] = "invalid_memory"
             persist(path, state)
     return persist(path, state)
