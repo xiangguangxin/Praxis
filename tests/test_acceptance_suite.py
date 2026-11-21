@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class AcceptanceSuiteTests(unittest.TestCase):
     def test_suite_has_twelve_unique_independently_checked_tasks(self):
-        cases = json.loads((ROOT / "examples/live-acceptance-suite.json").read_text())["scenarios"]
+        cases = json.loads((ROOT / "examples/live-acceptance-suite.json").read_text(encoding="utf-8"))["scenarios"]
         _validate(cases, 3)
         self.assertEqual(len(cases), 12)
         for case in cases:
@@ -54,7 +54,7 @@ class AcceptanceBrowserTests(unittest.TestCase):
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        cases = json.loads((ROOT / "examples/live-acceptance-suite.json").read_text())["scenarios"]
+        cases = json.loads((ROOT / "examples/live-acceptance-suite.json").read_text(encoding="utf-8"))["scenarios"]
         values = {"customer": "Alice", "unicode": "西安研发", "quantity": "7", "trim": "  Alpha  ",
                   "uppercase": "praxis", "confirm": "approved", "region": "report", "wizard": "step-one",
                   "filter": "delta", "validation": "0"}
