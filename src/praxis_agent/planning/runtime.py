@@ -7,7 +7,7 @@ class TaskRuntimeError(ValueError):
 class TaskPlanRuntime:
     VERSION = 1
 
-    def __init__(self, plan, criteria, *, max_attempts=2, data=None):
+    def __init__(self, plan, criteria, *, max_attempts=2, data=None, available_criteria=None):
         if type(max_attempts) is not int or not 1 <= max_attempts <= 5:
             raise TaskRuntimeError("max_attempts must be 1..5")
         source = data.get("graph") if isinstance(data, dict) else plan
@@ -16,6 +16,12 @@ class TaskPlanRuntime:
         except (TaskGraphError, TypeError) as exc:
             raise TaskRuntimeError("Invalid task plan: " + str(exc)) from exc
         self.criteria = list(criteria)
+        self.acceptance_catalog = set(self.criteria if available_criteria is None else available_criteria)
+        if (not set(self.criteria).issubset(self.acceptance_catalog)
+                or any(not isinstance(c, str) or not c.strip() for c in self.acceptance_catalog)):
+            raise TaskRuntimeError("Trusted acceptance catalog must include every Goal criterion")
+        if data and "acceptance_catalog" in data and set(data["acceptance_catalog"]) != self.acceptance_catalog:
+            raise TaskRuntimeError("Resume requires the original trusted acceptance catalog")
         self.max_attempts = data.get("max_attempts", max_attempts) if data else max_attempts
         if type(self.max_attempts) is not int or not 1 <= self.max_attempts <= 5:
             raise TaskRuntimeError("Invalid task retry budget")
@@ -48,12 +54,12 @@ class TaskPlanRuntime:
                 raise TaskRuntimeError("Replacement must preserve completed task definitions and status")
         if any(status != "pending" for name, status in replacement.status.items() if name not in completed):
             raise TaskRuntimeError("Replacement unfinished tasks must all start pending")
-        allowed, covered = set(self.criteria), set()
+        allowed, covered = self.acceptance_catalog, set()
         for task in replacement.tasks.values():
             if not task.acceptance or not set(task.acceptance).issubset(allowed):
-                raise TaskRuntimeError("Replacement task acceptance must match Goal criteria")
+                raise TaskRuntimeError("Replacement task acceptance must use trusted verifier criteria")
             covered.update(task.acceptance)
-        if covered != allowed:
+        if not set(self.criteria).issubset(covered):
             raise TaskRuntimeError("Replacement plan must cover every Goal criterion")
         self.graph = replacement
         self.attempts = {name: self.attempts.get(name, 0) for name in self.graph.tasks}
@@ -62,12 +68,12 @@ class TaskPlanRuntime:
         self._event("remaining_plan_replaced", "", "preserved " + str(len(completed)) + " completed tasks")
 
     def _validate_acceptance(self):
-        allowed, covered = set(self.criteria), set()
+        allowed, covered = self.acceptance_catalog, set()
         for task in self.graph.tasks.values():
             if not task.acceptance or not set(task.acceptance).issubset(allowed):
-                raise TaskRuntimeError("Every task must declare acceptance criteria from the goal criteria")
+                raise TaskRuntimeError("Every task must declare acceptance criteria from trusted verifier rules")
             covered.update(task.acceptance)
-        if covered != allowed:
+        if not set(self.criteria).issubset(covered):
             raise TaskRuntimeError("Task plan must cover every goal acceptance criterion")
 
     def _event(self, event, task_id, detail=""):
@@ -131,5 +137,6 @@ class TaskPlanRuntime:
 
     def to_dict(self):
         return {"version": self.VERSION, "graph": self.graph.to_dict(), "attempts": dict(self.attempts),
+                "acceptance_catalog": sorted(self.acceptance_catalog),
                 "results": dict(self.results), "baselines": dict(self.baselines),
                 "events": list(self.events[-100:]), "max_attempts": self.max_attempts}
