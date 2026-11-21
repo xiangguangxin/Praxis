@@ -41,11 +41,11 @@ jobs:
       - name: Evaluate real provider against local browser fixture
         shell: bash
         run: |
-          python -m http.server 8765 --bind 127.0.0.1 --directory examples/coverage-web &
+          python -m http.server 8765 --bind 127.0.0.1 --directory examples/acceptance-web &
           fixture_pid=$!
           trap 'kill "$fixture_pid"' EXIT
           python scripts/wait_for_fixture.py http://127.0.0.1:8765/
-          praxis-benchmark examples/live-coverage-suite.json --browser-url http://127.0.0.1:8765/ --browser-executable "$OPENAS_TEST_BROWSER_EXECUTABLE" --repeat "$TRIALS" --output live-browser-report.json
+          praxis-benchmark examples/live-acceptance-suite.json --browser-url http://127.0.0.1:8765/ --browser-executable "$OPENAS_TEST_BROWSER_EXECUTABLE" --repeat "$TRIALS" --policy examples/acceptance-policy.json --max-model-calls 40 --max-model-tokens 100000 --allow-failures --output live-browser-report.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

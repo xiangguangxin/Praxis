@@ -6,6 +6,8 @@ import json
 import statistics
 import tempfile
 import time
+import math
+from urllib.parse import urljoin, urlsplit
 from pathlib import Path
 
 from .agent import run
@@ -112,7 +114,22 @@ def _metrics(records, synthetic):
     for item in records:
         for route, count in item.get("routes", {}).items():
             route_counts[route] = route_counts.get(route, 0) + count
+    successes = sum(item["passed"] for item in records)
+    count = len(records)
+    rate = successes / count
+    z = 1.96
+    denominator = 1 + z*z/count
+    center = (rate + z*z/(2*count)) / denominator
+    radius = z * math.sqrt(rate*(1-rate)/count + z*z/(4*count*count)) / denominator
+    elapsed = sorted(item.get("elapsed_seconds", 0) for item in records)
+    claimed = [item for item in records if item.get("status") == "completed"]
     return {
+        "success_rate_95ci": [max(0, center-radius), min(1, center+radius)],
+        "p50_seconds": statistics.median(elapsed),
+        "p95_seconds": elapsed[max(0, math.ceil(count*0.95)-1)],
+        "false_completion_rate": (sum(not item["completed_and_verified"] for item in claimed) / len(claimed)
+                                  if claimed else None),
+        "reconciled_runs": sum(bool(item.get("reconciled")) for item in records),
         "route_counts": route_counts,
         "trajectory_pass_rate": statistics.mean(trajectories) if trajectories else None,
         "runs": len(records), "success_rate": statistics.mean(item["passed"] for item in records),
@@ -179,6 +196,18 @@ def benchmark(scenarios: list[dict], *, repeat: int = 1) -> dict:
     return _report("offline-synthetic", records, provenance)
 
 
+def _case_url(base, case):
+    """Operator-owned scenarios can select paths, never another backend origin."""
+    from .adapters.browser import _origin
+    path = case.get("start_path", "")
+    if not isinstance(path, str) or urlsplit(path).scheme or urlsplit(path).netloc:
+        raise ValueError("Benchmark start_path must be relative to the configured origin")
+    target = urljoin(base, path)
+    if _origin(target) != _origin(base):
+        raise ValueError("Benchmark scenario changes browser origin")
+    return target
+
+
 def live_benchmark(scenarios, args):
     _validate(scenarios, args.repeat)
     for case in scenarios:
@@ -186,6 +215,8 @@ def live_benchmark(scenarios, args):
             raise ValueError(f"{case['name']}: live scenarios require a goal")
         if {"outputs", "fail_action", "interrupt_after_write"} & case.keys():
             raise ValueError(f"{case['name']}: scripted outputs, actions and interruption are offline only")
+        if args.browser_url:
+            _case_url(args.browser_url, case)
     connection = resolve_model_connection(args)
     experience = ExperienceStore(args.experience_store) if args.experience_store else None
     from .evolution import EvolutionStore
@@ -231,10 +262,11 @@ def live_benchmark(scenarios, args):
                     from .policy import ActionPolicy, fingerprint
                     policy_path = getattr(args, "policy", None)
                     policy = ActionPolicy.from_json(policy_path) if policy_path else ActionPolicy()
-                    scope = (browser_scope(args.browser_url, output) if args.browser_url else
+                    browser_url = _case_url(args.browser_url, case) if args.browser_url else None
+                    scope = (browser_scope(browser_url, output) if browser_url else
                              fingerprint({"nova": str(Path(args.nova).resolve())}))
                     start = time.perf_counter()
-                    with open_session(planner, nova=args.nova, browser_url=args.browser_url,
+                    with open_session(planner, nova=args.nova, browser_url=browser_url,
                                       download_dir=output if args.browser_url else None,
                                       browser_executable=args.browser_executable) as target:
                         state = run(path, target, planner, verifier=verifier, backend_scope=scope,
