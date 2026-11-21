@@ -1,6 +1,7 @@
 """Capability- and risk-aware routing across configured OpenAI-compatible models."""
 from dataclasses import dataclass
 import json
+import math
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -13,8 +14,14 @@ class ModelProfile:
     capabilities: frozenset[str]
     max_cost_tier: int = 1
     task_types: frozenset[str] = frozenset()
+    input_price_per_million: float | None = None
+    output_price_per_million: float | None = None
 
     def __post_init__(self):
+        prices = (self.input_price_per_million, self.output_price_per_million)
+        if ((prices[0] is None) != (prices[1] is None)
+                or any(p is not None and (type(p) not in (int, float) or not math.isfinite(p) or p < 0) for p in prices)):
+            raise ValueError("Both token prices must be finite and nonnegative")
         p=urlsplit(self.endpoint)
         if not self.name or not self.model or not self.api_key_env.isidentifier(): raise ValueError("Invalid model profile")
         if p.scheme not in {"http","https"} or not p.hostname or p.username or p.password or p.query or p.fragment: raise ValueError("Invalid model endpoint")
@@ -36,13 +43,13 @@ class ModelRouter:
         if not isinstance(data,dict) or set(data)!={"default","profiles"} or not isinstance(data["profiles"],list): raise ValueError("Invalid model profile configuration")
         profiles=[]
         for item in data["profiles"]:
-            if not isinstance(item,dict) or set(item)-{"name","model","endpoint","api_key_env","capabilities","max_cost_tier","task_types"}: raise ValueError("Invalid profile fields")
-            profiles.append(ModelProfile(item["name"],item["model"],item["endpoint"],item["api_key_env"],frozenset(item["capabilities"]),item.get("max_cost_tier",1),frozenset(item.get("task_types",[]))))
+            if not isinstance(item,dict) or set(item)-{"name","model","endpoint","api_key_env","capabilities","max_cost_tier","task_types","input_price_per_million","output_price_per_million"}: raise ValueError("Invalid profile fields")
+            profiles.append(ModelProfile(item["name"],item["model"],item["endpoint"],item["api_key_env"],frozenset(item["capabilities"]),item.get("max_cost_tier",1),frozenset(item.get("task_types",[])),item.get("input_price_per_million"),item.get("output_price_per_million")))
         return cls(profiles,data["default"])
-    def select(self, *, task_type="general", requires_vision=False, risk="low", preferred=None):
+    def select(self, *, task_type="general", requires_vision=False, risk="low", preferred=None, exclude=()):
         if risk not in {"low","medium","high"}: raise ValueError("Invalid risk")
         required={"chat"} | ({"vision"} if requires_vision else set())
-        candidates=[p for p in self.profiles.values() if required <= p.capabilities]
+        candidates=[p for p in self.profiles.values() if required <= p.capabilities and p.name not in exclude]
         if preferred:
             p=self.profiles.get(preferred)
             if p not in candidates: raise ValueError("Preferred profile lacks required capabilities")

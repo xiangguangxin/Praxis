@@ -20,6 +20,7 @@ from .recovery import reconcile
 from .session import browser_scope, open_session
 from .state import ALLOWED, create
 from .verification import FileVerifier
+from .request_runtime import add_request_arguments, request_options
 
 
 def _write_fixture(root, files):
@@ -101,6 +102,9 @@ def _record(case, index, variant, state, verifier, actions, elapsed):
                    if key.startswith("route_") and type(value) is int},
         "estimated_input_tokens": usage.get("estimated_input_tokens", 0),
         "elapsed_seconds": round(elapsed, 4),
+        "cost_microusd": usage.get("cost_microusd", 0),
+        "cost_unknown_calls": usage.get("cost_unknown_calls", 0),
+        "provider_retries": usage.get("retries", 0),
         **trajectory,
     }
 
@@ -130,6 +134,8 @@ def _metrics(records, synthetic):
         "false_completion_rate": (sum(not item["completed_and_verified"] for item in claimed) / len(claimed)
                                   if claimed else None),
         "reconciled_runs": sum(bool(item.get("reconciled")) for item in records),
+        "total_cost_usd": (sum(item.get("cost_microusd", 0) for item in records) / 1_000_000
+                           if not synthetic and all(item.get("cost_unknown_calls", 1) == 0 for item in records) else None),
         "route_counts": route_counts,
         "trajectory_pass_rate": statistics.mean(trajectories) if trajectories else None,
         "runs": len(records), "success_rate": statistics.mean(item["passed"] for item in records),
@@ -227,7 +233,8 @@ def live_benchmark(scenarios, args):
         raise ValueError("--strategy-candidate-id requires --evolution-store")
     provenance = manifest(scenarios, args.repeat)
     provenance["model_connection"] = connection.kind
-    provenance["model_budget"] = {"max_calls": args.max_model_calls, "max_tokens": args.max_model_tokens}
+    provenance["model_budget"] = {"max_calls": args.max_model_calls, "max_tokens": args.max_model_tokens,
+                                  **request_options(args)}
     if args.browser_url:
         provenance["playwright_version"] = package_version("playwright")
     records = []
@@ -258,7 +265,8 @@ def live_benchmark(scenarios, args):
                                            experience_environment=args.experience_environment,
                                            evolution_store=evolution if variant == "strategy_candidate" else None,
                                            evolution_environment=args.evolution_environment if variant == "strategy_candidate" else "",
-                                           strategy_candidate_id=args.strategy_candidate_id if variant == "strategy_candidate" else None)
+                                           strategy_candidate_id=args.strategy_candidate_id if variant == "strategy_candidate" else None,
+                                           **request_options(args))
                     from .policy import ActionPolicy, fingerprint
                     policy_path = getattr(args, "policy", None)
                     policy = ActionPolicy.from_json(policy_path) if policy_path else ActionPolicy()
@@ -283,6 +291,7 @@ def live_benchmark(scenarios, args):
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Praxis goal execution")
+    add_request_arguments(parser)
     parser.add_argument("suite", type=Path)
     parser.add_argument("--case", help="Only run this scenario")
     parser.add_argument("--repeat", type=int, default=1)

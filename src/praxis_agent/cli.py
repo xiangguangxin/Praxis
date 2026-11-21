@@ -11,6 +11,7 @@ from .state import create, load
 from .tool_trace import compare_checkpoints
 from .verification import FileVerifier
 from .verifiers.configured import load_verifier
+from .request_runtime import add_request_arguments, request_options
 
 
 def main():
@@ -64,6 +65,7 @@ def main():
     worker.add_argument("--download-dir", type=Path)
     worker.add_argument("--browser-executable")
     add_model_arguments(worker)
+    add_request_arguments(worker)
     worker.add_argument("--model-profiles", type=Path)
     worker.add_argument("--verifier", type=Path)
     worker.add_argument("--trace-tools", action="store_true")
@@ -101,6 +103,7 @@ def main():
         execution.add_argument("--download-dir", type=Path, help="Existing directory for new browser downloads")
         execution.add_argument("--browser-executable")
         add_model_arguments(execution)
+        add_request_arguments(execution)
         execution.add_argument("--approve-pending", action="store_true")
         execution.add_argument("--approval-id", help="Require this exact pending approval fingerprint")
         execution.add_argument("--policy", type=Path, help="Trusted exact-match operator action rules")
@@ -211,7 +214,7 @@ def _execute(args, execution_guard=None):
                            experience_environment=args.experience_environment, model_router=router,
                            evolution_store=__import__("praxis_agent.evolution", fromlist=["EvolutionStore"]).EvolutionStore(args.evolution_store) if args.evolution_store else None,
                            evolution_environment=args.evolution_environment,
-                           strategy_candidate_id=getattr(args, "strategy_candidate_id", None))
+                           strategy_candidate_id=getattr(args, "strategy_candidate_id", None), **request_options(args))
     verifier = load_verifier(args.verifier) if args.verifier else None
     from .policy import fingerprint
     scope = (browser_scope(args.browser_url, download_dir) if args.browser_url else

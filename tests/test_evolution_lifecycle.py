@@ -73,7 +73,7 @@ class EvolutionLifecycleTests(unittest.TestCase):
         class Response:
             def __enter__(self): return self
             def __exit__(self,*args): pass
-            def read(self):
+            def read(self, size=-1):
                 return json.dumps({"choices":[{"message":{"content":'{"type":"pause","reason":"inspect"}'}}],
                                    "usage":{"prompt_tokens":10,"completion_tokens":5}}).encode()
         def fake(request,timeout):

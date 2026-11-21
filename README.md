@@ -121,6 +121,10 @@ The local file verifier supports safe root-constrained paths, minimum size, cont
 
 ## Review and recovery
 
+[Model request controls](docs/model-resilience.md) add bounded provider retries,
+capability-preserving failover, endpoint circuits, cost accounting and resumable
+run deadlines. Tool reconciliation and approval gates remain enforced.
+
 Advertised tool schemas are validated locally before dispatch; unknown tools or
 invalid arguments never reach the backend. Remote schema references are not fetched.
 
